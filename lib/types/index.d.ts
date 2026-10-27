@@ -1,0 +1,112 @@
+/**
+ * Experimental team orchestrator: a configuration-declared role table resolves
+ * task kinds to per-role child LLM routes. Roles are host-pinned data — the
+ * model never names a route. The `team_dispatch` tool and the captain prompt
+ * section mount when the configured subagent provider registers.
+ *
+ * @module @deepseek-ai/dsh-experimental-team-orchestrator
+ */
+import { Context, Service } from '@deepseek-ai/cordis';
+import type { Config } from './config.ts';
+import { type ResolvedRole } from './roles.ts';
+import { type DispatchRecord } from './dispatch.ts';
+export type { Config, RoleConfig } from './config.ts';
+export { resolveRoles, resolveTaskKind, validateRoleRoutes } from './roles.ts';
+export type { ResolvedRole } from './roles.ts';
+export { composeDispatchPrompt, captainSectionText, defineTeamDispatchTool } from './dispatch.ts';
+export type { DispatchArgs, DispatchRecord, TeamDispatchDeps, UsageSnapshot } from './dispatch.ts';
+export { defineTeamStatusTool, roleStatusRows } from './status.ts';
+export type { RoleStatus, TeamStatusDeps } from './status.ts';
+declare module '@deepseek-ai/cordis' {
+    interface Context {
+        /** Experimental role-pinned team delegation. */
+        teamOrchestrator: TeamOrchestrator;
+    }
+}
+/**
+ * Owns the resolved role table and the `team_dispatch` delegation tool.
+ * Structural and referential validation rejects at mount; live route
+ * validation runs against the LLM runtime at init and, when a provider
+ * adapter has not registered yet, re-runs on `llm/adapters-updated` — the
+ * earliest resolvable point for each route. The tool and captain section mount
+ * when the configured subagent provider registers.
+ */
+export declare class TeamOrchestrator extends Service {
+    static inject: string[];
+    static Config: import("@deepseek-ai/schemastery").default<Config>;
+    private readonly config;
+    private readonly roles;
+    private activeDispatches;
+    private readonly dispatchRecords;
+    private readonly settledChildren;
+    private readonly childSessions;
+    private usageReader;
+    constructor(ctx: Context, config: Config);
+    protected [Service.init](): Promise<void>;
+    /**
+     * Validate every declared role preset against the agent-presets registry,
+     * the earliest resolvable point: an unknown preset id rejects this mount.
+     */
+    private initPresetValidation;
+    /**
+     * Capture settled children's provider-reported usage off the shared
+     * `tokenUsage` projection. The child's live Session is retained at
+     * `subagent/start` — which precedes the dispatch tool's own registry write,
+     * so retention is not gated on a recorded dispatch — and released at the
+     * paired end. A held Session's committed events stay foldable after child
+     * disposal, so the end edge reads final totals.
+     */
+    private initUsageCapture;
+    /**
+     * Read one settled child's usage totals onto its dispatch record.
+     * @param info - the settled run's end payload.
+     */
+    private captureUsage;
+    /** Validate declared routes, deferring until every provider adapter registers. */
+    private initRouteValidation;
+    /** Mount `team_dispatch` and the captain section once the provider registers. */
+    private initDelegationTool;
+    /**
+     * Resolve one task kind to its routed role.
+     * @param kind - task kind requested by a caller.
+     * @returns the routed role.
+     */
+    roleFor(kind: string): ResolvedRole;
+    /** Declared task kinds, in configuration order. */
+    get kinds(): readonly string[];
+    /** Maximum concurrently running dispatched children. */
+    get maxConcurrency(): number;
+    /** Whether the captain may request a route outside the declared table. */
+    get captainMayOverride(): boolean;
+    /**
+     * Take one dispatch concurrency slot.
+     * @throws when the configured cap is already running.
+     */
+    admitDispatch(): void;
+    /** Return one dispatch concurrency slot after the dispatched child settles. */
+    releaseDispatch(): void;
+    /**
+     * Record one accepted dispatch for status reporting.
+     * @param entry - the accepted dispatch's identifying data.
+     */
+    recordDispatch(entry: DispatchRecord): void;
+    /**
+     * Mark one recorded dispatch settled when its child run settles.
+     * @param childId - the settled child's session id.
+     */
+    markSettled(childId: string): void;
+    /**
+     * Recent labels already dispatched for one kind, newest first.
+     * @param kind - the task kind to look up.
+     * @param excludeChildId - one child id to skip, conventionally the dispatch being answered.
+     * @returns up to three labels of prior dispatches of this kind.
+     */
+    recentLabelsFor(kind: string, excludeChildId?: string): readonly string[];
+    /** Dispatches currently running against the concurrency cap. */
+    get runningDispatches(): number;
+    /** The dispatch registry snapshot, newest first. */
+    get registry(): readonly DispatchRecord[];
+}
+export declare const name = "team-orchestrator";
+export default TeamOrchestrator;
+//# sourceMappingURL=index.d.ts.map

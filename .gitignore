@@ -1,0 +1,29 @@
+# 依赖
+node_modules/
+
+# 构建产物 —— 注意:单独仓库分发时【要提交 lib/】(收件人安装不跑构建,
+# 见 README 的分发说明);只有在走"发布时构建"的流程才取消下面这行注释。
+# lib/
+
+# 打包产物
+*.tgz
+
+# 密钥与环境 —— 永远不要提交
+.env
+.env.*
+!.env.example
+
+# 会话/演示产物
+demo-out/
+*.log
+
+# 本地实验与安全扫描缓存
+.mimosa/
+experiment/
+
+# 编辑器与系统
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

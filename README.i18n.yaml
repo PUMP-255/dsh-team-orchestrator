@@ -1,0 +1,28 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/experimental/team-orchestrator/README.md
+/:
+  en: 1ff4631648aff6cc
+  zh: e2dcefca91094d09
+/deepseek-ai-dsh-experimental-team-orchestrator:
+  en: f601130c718d6f3d
+  zh: c4cc778ba5ea3556
+/deepseek-ai-dsh-experimental-team-orchestrator/summary:
+  en: 756fed006b3c2ff8
+  zh: cb14b3780ba80bd9
+/deepseek-ai-dsh-experimental-team-orchestrator/table-of-contents:
+  en: c4479aff7e4a7a3c
+  zh: 2d06aa7b69a556c3
+/deepseek-ai-dsh-experimental-team-orchestrator/use-this-package:
+  en: cd5c63e4f1527311
+  zh: 7825f396b23b505f
+/deepseek-ai-dsh-experimental-team-orchestrator/use-this-package/model-facing-tools:
+  en: c777d83e4d0b82ad
+  zh: 4fa6767ff49836be
+/deepseek-ai-dsh-experimental-team-orchestrator/understand-the-implementation:
+  en: 812ebfeda9a0fc4e
+  zh: 5b369ce89f5a5728
+/deepseek-ai-dsh-experimental-team-orchestrator/known-limitations-and-deferred-work:
+  en: 0eae070a82d7cf0a
+  zh: 604ba1f517347a3a
