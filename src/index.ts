@@ -4,14 +4,16 @@
  * model never names a route. The `team_dispatch` tool and the captain prompt
  * section mount when the configured subagent provider registers.
  *
- * @module @deepseek-ai/dsh-experimental-team-orchestrator
+ * @module @deepseek-ai/dsh-team-orchestrator
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { Session } from '@deepseek-ai/dsh-session'
-import type { ProjectionHandle } from '@deepseek-ai/dsh-session-projection'
-import { tokenUsageProjectionDefinition } from '@deepseek-ai/dsh-token-meter'
-import type { TokenUsageState } from '@deepseek-ai/dsh-token-meter'
+// The token-meter service registers the shared `tokenUsage` projection when it
+// mounts; these imports only load the state-map and `Context.sessionProjections`
+// augmentations the reads below rely on.
+import '@deepseek-ai/dsh-token-meter'
+import type {} from '@deepseek-ai/dsh-session-projection'
 import type { SubagentProvider } from '@deepseek-ai/dsh-subagent'
 import type { SubagentRunEndInfo } from '@deepseek-ai/dsh-subagent'
 import type { Config } from './config.ts'
@@ -39,7 +41,7 @@ export type { RoleStatus, TeamStatusDeps } from './status.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
-    /** Experimental role-pinned team delegation. */
+    /** Role-pinned team delegation. */
     teamOrchestrator: TeamOrchestrator
   }
 }
@@ -63,7 +65,6 @@ export class TeamOrchestrator extends Service {
   private readonly dispatchRecords: DispatchRecord[] = []
   private readonly settledChildren = new Set<string>()
   private readonly childSessions = new Map<string, Session>()
-  private usageReader: ProjectionHandle<TokenUsageState> | undefined
 
   constructor(ctx: Context, config: Config) {
     super(ctx, 'teamOrchestrator')
@@ -105,13 +106,6 @@ export class TeamOrchestrator extends Service {
    * disposal, so the end edge reads final totals.
    */
   private initUsageCapture(): void {
-    void this.ctx.sessionProjections.register(tokenUsageProjectionDefinition)
-      .then((handle) => {
-        this.usageReader = handle
-      })
-      .catch((error: unknown) => {
-        this.ctx.logger.error('team-orchestrator: token usage projection unavailable: %s', error)
-      })
     this.ctx.effect(() => this.ctx.on('subagent/start', (info) => {
       const session = this.ctx.agents.get(info.id)?.session
       if (session !== undefined) this.childSessions.set(info.id, session)
@@ -124,12 +118,13 @@ export class TeamOrchestrator extends Service {
    * @param info - the settled run's end payload.
    */
   private captureUsage(info: SubagentRunEndInfo): void {
-    const reader = this.usageReader
     const record = this.dispatchRecords.find(entry => entry.childId === info.id)
     const session = this.childSessions.get(info.id)
     this.childSessions.delete(info.id)
-    if (reader === undefined || record === undefined || session === undefined || record.usage !== undefined) return
-    record.usage = { ...reader.stateOf(session).totals }
+    if (record === undefined || session === undefined || record.usage !== undefined) return
+    const state = this.ctx.sessionProjections.stateOf(session, 'tokenUsage')
+    if (state === undefined) return
+    record.usage = { ...state.totals }
   }
 
   /** Validate declared routes, deferring until every provider adapter registers. */
@@ -191,7 +186,7 @@ export class TeamOrchestrator extends Service {
       })
       const disposeSection = this.ctx.systemPrompt.section({
         name: 'team-orchestrator:captain',
-        order: this.ctx.systemPrompt.getSectionOrder('TOOL_TEAM_DISPATCH'),
+        order: this.ctx.systemPrompt.getSectionOrder('TOOL_SUBAGENT'),
         text: (context) => {
           if (this.ctx.tools.get(definition.name, context.scope) !== definition) return ''
           return captainSectionText(this.kinds, kind => this.roleFor(kind))

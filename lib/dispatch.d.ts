@@ -3,7 +3,7 @@
  * configured role table. The model declares what kind of task it is dispatching
  * and writes the brief; the plugin owns which role and route runs it.
  *
- * @module @deepseek-ai/dsh-experimental-team-orchestrator/dispatch
+ * @module @deepseek-ai/dsh-team-orchestrator/dispatch
  */
 import { type ToolDefinition } from '@deepseek-ai/dsh-tools';
 import type { ObjectJsonSchema } from '@deepseek-ai/dsh-tools';

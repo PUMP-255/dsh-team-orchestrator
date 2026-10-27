@@ -4,7 +4,7 @@
  * this process's in-memory record; it does not survive restarts and does not
  * include token usage (deferred until a cross-session usage read exists).
  *
- * @module @deepseek-ai/dsh-experimental-team-orchestrator/status
+ * @module @deepseek-ai/dsh-team-orchestrator/status
  */
 import { type ToolDefinition } from '@deepseek-ai/dsh-tools';
 import type { DispatchRecord, UsageSnapshot } from './dispatch.ts';

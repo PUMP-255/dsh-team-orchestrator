@@ -1,22 +1,16 @@
----
-description: "实验性角色固定团队委派:配置声明的角色表把任务类型解析为按角色的模型路由。"
-kind: "package-reference"
----
-
-# @deepseek-ai/dsh-experimental-team-orchestrator
+# @deepseek-ai/dsh-team-orchestrator
 
 [English](README.md) | 中文
 
 ## 摘要
 
-`dsh-experimental-team-orchestrator` 把配置声明的角色表转换为团队委派用的按角色子代理 LLM 路由。每个角色固定一组精确的 provider、模型和思考强度;任务类型路由表为被委派的任务选择角色。角色是宿主固定的数据:模型从不指定路由。
-
-本包为实验性:其公开契约仍在评估中,不构成产品支持承诺。
+`dsh-team-orchestrator` 把配置声明的角色表转换为团队委派用的按角色子代理 LLM 路由。每个角色固定一组精确的 provider、模型和思考强度;任务类型路由表为被委派的任务选择角色。角色是宿主固定的数据:模型从不指定路由。
 
 ## 目录
 
 - [使用本包](#use-this-package)
 - [理解实现](#understand-the-implementation)
+- [开发与分发](#develop-this-package)
 - [已知限制与后续工作](#known-limitations-and-deferred-work)
 
 -----
@@ -28,7 +22,7 @@ kind: "package-reference"
 
 ```yaml
 - id: team-orchestrator
-  name: '@deepseek-ai/dsh-experimental-team-orchestrator'
+  name: '@deepseek-ai/dsh-team-orchestrator'
   config:
     provider: spawn
     roles:
@@ -61,6 +55,17 @@ kind: "package-reference"
 ## 理解实现
 
 `resolveRoles` 承担 schema 无法表达的跨字段引用检查,并为每个角色构建带品牌化思考强度 id 的子代理 `AgentOptions`。`resolveTaskKind` 把请求的类型映射到角色,未知类型会列出已声明类型。`validateRoleRoutes` 把路由可许性委托给 `LlmRuntime.resolveCallConfig`,provider 缺少适配器的路由报告为推迟而不是让挂载失败。两个工具与队长提示词区在配置的 subagent 提供方注册时挂载;缺失的 provider 在日志中可见,并通过 `subagent/provider-added` 稍后挂载。
+
+<a id="develop-this-package"></a>
+## 开发与分发
+
+```sh
+npm install    # 安装依赖
+npm run build  # 从 src/ 生成 lib/(JavaScript、声明与 sourcemap)
+npm run test   # vitest 单元测试
+```
+
+`lib/` 随仓库提交:使用者安装本包后无需构建。`src/` 变更后重新构建并提交 `lib/`;`npm publish` 会经 `prepublishOnly` 再次构建并跑测试。本插件与其他 DSH 插件的挂载方式一致:在 cordis.yml(或 overlay)中按上面的示例声明,DSH 运行时从自己的安装中解析 `@deepseek-ai` 对等依赖。
 
 <a id="known-limitations-and-deferred-work"></a>
 ## 已知限制与后续工作

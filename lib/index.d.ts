@@ -4,9 +4,10 @@
  * model never names a route. The `team_dispatch` tool and the captain prompt
  * section mount when the configured subagent provider registers.
  *
- * @module @deepseek-ai/dsh-experimental-team-orchestrator
+ * @module @deepseek-ai/dsh-team-orchestrator
  */
 import { Context, Service } from '@deepseek-ai/cordis';
+import '@deepseek-ai/dsh-token-meter';
 import type { Config } from './config.ts';
 import { type ResolvedRole } from './roles.ts';
 import { type DispatchRecord } from './dispatch.ts';
@@ -19,7 +20,7 @@ export { defineTeamStatusTool, roleStatusRows } from './status.ts';
 export type { RoleStatus, TeamStatusDeps } from './status.ts';
 declare module '@deepseek-ai/cordis' {
     interface Context {
-        /** Experimental role-pinned team delegation. */
+        /** Role-pinned team delegation. */
         teamOrchestrator: TeamOrchestrator;
     }
 }
@@ -40,7 +41,6 @@ export declare class TeamOrchestrator extends Service {
     private readonly dispatchRecords;
     private readonly settledChildren;
     private readonly childSessions;
-    private usageReader;
     constructor(ctx: Context, config: Config);
     protected [Service.init](): Promise<void>;
     /**

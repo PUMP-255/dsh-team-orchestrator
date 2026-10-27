@@ -1,55 +1,59 @@
 {
-  "name": "@deepseek-ai/dsh-experimental-team-orchestrator",
-  "description": "Experimental role-pinned team delegation: config-declared roles resolve task kinds to per-role model routes",
+  "name": "@deepseek-ai/dsh-team-orchestrator",
+  "description": "Role-pinned team delegation: config-declared roles resolve task kinds to per-role model routes",
   "version": "0.1.0-rc.1",
   "publishConfig": {
     "access": "public"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/deepseek-ai/deepseek-harness.git",
-    "directory": "packages/experimental/team-orchestrator"
+    "url": "git+https://github.com/PUMP-255/dsh-team-orchestrator.git"
   },
   "type": "module",
-  "main": "lib/index.js",
-  "types": "lib/types/index.d.ts",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
   "exports": {
     ".": {
-      "types": "./lib/types/index.d.ts",
+      "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
     },
-    "./src/*": "./src/*",
     "./package.json": "./package.json"
   },
   "files": [
-    "lib/index.js",
-    "lib/types/**/*.js",
-    "lib/types/**/*.d.ts"
+    "lib"
   ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build && npm run test"
+  },
   "license": "MIT",
   "dependencies": {
-    "@deepseek-ai/schemastery": "workspace:~"
+    "@deepseek-ai/schemastery": "^3.18.5"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "workspace:~",
-    "@deepseek-ai/dsh-agent": "workspace:*",
-    "@deepseek-ai/dsh-llm": "workspace:*",
-    "@deepseek-ai/dsh-session": "workspace:*",
-    "@deepseek-ai/dsh-session-projection": "workspace:*",
-    "@deepseek-ai/dsh-subagent": "workspace:*",
-    "@deepseek-ai/dsh-system-prompt": "workspace:*",
-    "@deepseek-ai/dsh-token-meter": "workspace:*",
-    "@deepseek-ai/dsh-tools": "workspace:*"
+    "@deepseek-ai/cordis": "^4.0.5",
+    "@deepseek-ai/dsh-agent": "^0.2.1-rc.1",
+    "@deepseek-ai/dsh-llm": "^0.2.1-rc.1",
+    "@deepseek-ai/dsh-session": "^0.2.1-rc.1",
+    "@deepseek-ai/dsh-session-projection": "^0.2.1-rc.1",
+    "@deepseek-ai/dsh-subagent": "^0.2.1-rc.1",
+    "@deepseek-ai/dsh-system-prompt": "^0.2.1-rc.1",
+    "@deepseek-ai/dsh-token-meter": "^0.2.1-rc.1",
+    "@deepseek-ai/dsh-tools": "^0.2.1-rc.1"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "workspace:~",
-    "@deepseek-ai/dsh-agent": "workspace:*",
-    "@deepseek-ai/dsh-llm": "workspace:*",
-    "@deepseek-ai/dsh-session": "workspace:*",
-    "@deepseek-ai/dsh-session-projection": "workspace:*",
-    "@deepseek-ai/dsh-subagent": "workspace:*",
-    "@deepseek-ai/dsh-system-prompt": "workspace:*",
-    "@deepseek-ai/dsh-token-meter": "workspace:*",
-    "@deepseek-ai/dsh-tools": "workspace:*"
+    "@deepseek-ai/cordis": "^4.0.5",
+    "@deepseek-ai/dsh-agent": "^0.2.1-rc.1",
+    "@deepseek-ai/dsh-llm": "^0.2.1-rc.1",
+    "@deepseek-ai/dsh-session": "^0.2.1-rc.1",
+    "@deepseek-ai/dsh-session-projection": "^0.2.1-rc.1",
+    "@deepseek-ai/dsh-subagent": "^0.2.1-rc.1",
+    "@deepseek-ai/dsh-system-prompt": "^0.2.1-rc.1",
+    "@deepseek-ai/dsh-token-meter": "^0.2.1-rc.1",
+    "@deepseek-ai/dsh-tools": "^0.2.1-rc.1",
+    "@types/node": "^22.20.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.11"
   }
 }

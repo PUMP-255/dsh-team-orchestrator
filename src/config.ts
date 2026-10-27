@@ -4,7 +4,7 @@
  * targets, live model routes) are validated by {@link ./roles.ts} and the
  * service's init-time route check.
  *
- * @module @deepseek-ai/dsh-experimental-team-orchestrator/config
+ * @module @deepseek-ai/dsh-team-orchestrator/config
  */
 
 import z from '@deepseek-ai/schemastery'

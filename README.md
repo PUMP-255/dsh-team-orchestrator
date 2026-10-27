@@ -1,22 +1,16 @@
----
-description: "Experimental role-pinned team delegation: a config-declared role table resolves task kinds to per-role model routes."
-kind: "package-reference"
----
-
-# @deepseek-ai/dsh-experimental-team-orchestrator
+# @deepseek-ai/dsh-team-orchestrator
 
 English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-experimental-team-orchestrator` turns a configuration-declared role table into per-role child LLM routes for team delegation. Each role pins one exact provider, model, and reasoning effort; a task-kind routing map selects the role for a delegated task. Roles are host-pinned data: the model never names a route.
-
-The package is experimental: its public contract remains under evaluation without a product-support commitment.
+`dsh-team-orchestrator` turns a configuration-declared role table into per-role child LLM routes for team delegation. Each role pins one exact provider, model, and reasoning effort; a task-kind routing map selects the role for a delegated task. Roles are host-pinned data: the model never names a route.
 
 ## Table of Contents
 
 - [Use this package](#use-this-package)
 - [Understand the implementation](#understand-the-implementation)
+- [Develop this package](#develop-this-package)
 - [Known limitations and deferred work](#known-limitations-and-deferred-work)
 
 -----
@@ -28,7 +22,7 @@ Declare roles and task-kind routing in the composition (cordis.yml or an overlay
 
 ```yaml
 - id: team-orchestrator
-  name: '@deepseek-ai/dsh-experimental-team-orchestrator'
+  name: '@deepseek-ai/dsh-team-orchestrator'
   config:
     provider: spawn
     roles:
@@ -60,6 +54,17 @@ Mount rejects an empty role table, an empty routing map, and any routing entry n
 ## Understand the implementation
 
 `resolveRoles` performs the cross-field referent checks the schema cannot express and builds each role's child `AgentOptions` with a branded reasoning-effort id. `resolveTaskKind` maps a requested kind to its role and lists the declared kinds on an unknown kind. `validateRoleRoutes` delegates route admissibility to `LlmRuntime.resolveCallConfig`, reporting routes whose provider lacks an adapter as deferred instead of failing the mount. Both tools and the captain section mount when the configured subagent provider registers; a missing provider stays visible in the log and mounts later through `subagent/provider-added`.
+
+<a id="develop-this-package"></a>
+## Develop this package
+
+```sh
+npm install    # install dependencies
+npm run build  # emit lib/ (JavaScript, declarations, and maps) from src/
+npm run test   # vitest unit tests
+```
+
+`lib/` is committed: consumers install the package without building it. Rebuild and commit `lib/` whenever `src/` changes; `npm publish` runs the build and tests again through `prepublishOnly`. The plugin mounts like any DSH plugin: list it in cordis.yml (or an overlay) with the configuration shown above, and the DSH runtime resolves the `@deepseek-ai` peer dependencies from its own installation.
 
 ## Known limitations and deferred work
 

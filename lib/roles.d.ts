@@ -3,7 +3,7 @@
  * out. Owns the cross-field referent checks the schema cannot express (routing
  * targets, non-empty tables) so misconfiguration rejects at the resolve step.
  *
- * @module @deepseek-ai/dsh-experimental-team-orchestrator/roles
+ * @module @deepseek-ai/dsh-team-orchestrator/roles
  */
 import type { AgentOptions } from '@deepseek-ai/dsh-agent';
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm';
