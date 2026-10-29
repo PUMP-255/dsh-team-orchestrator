@@ -1,0 +1,50 @@
+# 弱模型矩阵 + 强模型兜底 —— 来自 SWE-bench pilot 战役结论的示例组合。
+#
+# 战役数据(9 个配对实例):all-weak 9/9 解、$0.004/任务、62s,
+# 优于 all-strong(8/9、$0.053)与静态分层(9/9、$0.062);
+# 静态分层输在"强 leader 自己把活干了"(96.5% token)。
+# 因此本组合把全部角色都放在快模型上,强模型只作失败兜底:
+# 派发的子代理未完成结算(error / max-tokens / refusal)时,
+# 插件自动用 fallback 路由重派一次,无需队长介入。
+#
+# 用法:pnpm dsh --profile <profile> --patch weak-matrix.patch.yml "<任务>"
+
+- insert:
+    - id: team-orchestrator
+      name: '@deepseek-ai/dsh-team-orchestrator'
+      config:
+        provider: spawn
+        roles:
+          planner:
+            provider: deepseek-official
+            model: deepseek-flash
+            reasoningEffort: low
+            brief: You are the planning role. Produce a complete, directly implementable brief.
+            fallback:
+              provider: deepseek-official
+              model: deepseek-v4-pro
+              reasoningEffort: high
+          coder:
+            provider: deepseek-official
+            model: deepseek-flash
+            reasoningEffort: low
+            brief: You are the implementation role. Follow the brief exactly; make no design decisions.
+            maxTokens: 65536
+            fallback:
+              provider: deepseek-official
+              model: deepseek-v4-pro
+              reasoningEffort: high
+          reviewer:
+            provider: deepseek-official
+            model: deepseek-flash
+            reasoningEffort: low
+            brief: You are the review role. Review correctness, edge cases, and style; report findings only.
+            fallback:
+              provider: deepseek-official
+              model: deepseek-v4-pro
+              reasoningEffort: high
+        taskRouting:
+          plan: planner
+          implement: coder
+          review: reviewer
+        concurrency: 3

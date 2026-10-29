@@ -19,12 +19,23 @@ export interface ResolvedRole {
         model: string;
         reasoningEffort: ReturnType<typeof ReasoningEffortId>;
     }>;
-    /** Child Agent options carrying the pinned route. */
+    /** Child Agent options carrying the pinned route and output-token cap. */
     readonly options: AgentOptions;
     /** Role discipline prepended to every delegated prompt; absent when undeclared. */
     readonly brief?: string;
     /** Agent preset id the role's children join; absent when undeclared. */
     readonly preset?: string;
+    /** The stronger escalation route; absent when the role declares no fallback. */
+    readonly fallback?: {
+        /** The exact escalation route. */
+        readonly route: Readonly<{
+            provider: string;
+            model: string;
+            reasoningEffort: ReturnType<typeof ReasoningEffortId>;
+        }>;
+        /** Child Agent options carrying the escalation route. */
+        readonly options: AgentOptions;
+    };
 }
 /**
  * Resolve the declared role table. Rejects an empty table, an empty routing

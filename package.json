@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-team-orchestrator",
   "description": "Role-pinned team delegation: config-declared roles resolve task kinds to per-role model routes",
-  "version": "0.1.0-rc.1",
+  "version": "0.1.0-rc.2",
   "publishConfig": {
     "access": "public"
   },
@@ -20,6 +20,7 @@
     "./package.json": "./package.json"
   },
   "files": [
+    "examples/*.patch.yml",
     "lib"
   ],
   "scripts": {
@@ -29,7 +30,8 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@deepseek-ai/schemastery": "^3.18.5"
+    "@deepseek-ai/schemastery": "^3.18.5",
+    "zod": "4.4.3"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.5",
@@ -39,18 +41,17 @@
     "@deepseek-ai/dsh-session-projection": "^0.2.1-rc.1",
     "@deepseek-ai/dsh-subagent": "^0.2.1-rc.1",
     "@deepseek-ai/dsh-system-prompt": "^0.2.1-rc.1",
-    "@deepseek-ai/dsh-token-meter": "^0.2.1-rc.1",
     "@deepseek-ai/dsh-tools": "^0.2.1-rc.1"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.5",
     "@deepseek-ai/dsh-agent": "^0.2.1-rc.1",
     "@deepseek-ai/dsh-llm": "^0.2.1-rc.1",
+    "@deepseek-ai/dsh-llm-retry": "^0.2.1-rc.1",
     "@deepseek-ai/dsh-session": "^0.2.1-rc.1",
     "@deepseek-ai/dsh-session-projection": "^0.2.1-rc.1",
     "@deepseek-ai/dsh-subagent": "^0.2.1-rc.1",
     "@deepseek-ai/dsh-system-prompt": "^0.2.1-rc.1",
-    "@deepseek-ai/dsh-token-meter": "^0.2.1-rc.1",
     "@deepseek-ai/dsh-tools": "^0.2.1-rc.1",
     "@types/node": "^22.20.1",
     "typescript": "^6.0.3",

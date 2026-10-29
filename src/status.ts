@@ -1,14 +1,15 @@
 /**
  * The model-facing `team_status` tool: one snapshot of the dispatch registry —
- * concurrency against the cap and per-role dispatch counts. Registry state is
- * this process's in-memory record; it does not survive restarts and does not
- * include token usage (deferred until a cross-session usage read exists).
+ * concurrency against the cap, per-role dispatch counts, and summed
+ * provider-reported token usage of settled dispatches. Registry state is this
+ * process's in-memory record; it does not survive restarts.
  *
  * @module @deepseek-ai/dsh-team-orchestrator/status
  */
 
 import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools'
-import type { DispatchRecord, UsageSnapshot } from './dispatch.ts'
+import type { UsageSnapshot } from './dispatch.ts'
+import type { DispatchRecord } from './dispatch.ts'
 import type { ResolvedRole } from './roles.ts'
 
 /** The registry surface `team_status` reports; narrowed for direct unit testing. */
@@ -39,6 +40,8 @@ export interface RoleStatus {
   readonly dispatched: number
   /** Dispatches still running. */
   readonly running: number
+  /** Settled dispatches whose child did not complete. */
+  readonly failed: number
   /** Labels of this role's dispatches, newest first. */
   readonly labels: readonly string[]
   /** Summed provider-reported usage of this role's settled dispatches; absent when none settled readably. */
@@ -83,6 +86,7 @@ export function roleStatusRows(deps: TeamStatusDeps): readonly RoleStatus[] {
         effort: role.route.reasoningEffort,
         dispatched: 0,
         running: 0,
+        failed: 0,
         labels: [],
       },
       records: [],
@@ -92,11 +96,13 @@ export function roleStatusRows(deps: TeamStatusDeps): readonly RoleStatus[] {
     const entry = rows.get(record.role)
     if (entry === undefined) continue
     const running = deps.settledChildIds.has(record.childId) ? 0 : 1
+    const failed = record.outcome !== undefined && record.outcome !== 'completed' ? 1 : 0
     entry.records.push(record)
     entry.row = {
       ...entry.row,
       dispatched: entry.row.dispatched + 1,
       running: entry.row.running + running,
+      failed: entry.row.failed + failed,
       labels: [record.label, ...entry.row.labels],
     }
   }
@@ -136,6 +142,7 @@ export function defineTeamStatusTool(deps: TeamStatusDeps): ToolDefinition {
                 effort: { type: 'string', required: true },
                 dispatched: { type: 'number', required: true },
                 running: { type: 'number', required: true },
+                failed: { type: 'number', required: true },
                 usage: {
                   type: 'object',
                   additionalProperties: false,
@@ -156,7 +163,8 @@ export function defineTeamStatusTool(deps: TeamStatusDeps): ToolDefinition {
           const usage = row.usage === undefined
             ? ''
             : `; tokens in/out ${row.usage.uncachedInputTokens}/${row.usage.outputTokens}`
-          return `${row.role}: ${row.running} running / ${row.dispatched} dispatched (${row.model} at ${row.effort}${usage})`
+          const failed = row.failed === 0 ? '' : `, ${row.failed} failed`
+          return `${row.role}: ${row.running} running / ${row.dispatched} dispatched${failed} (${row.model} at ${row.effort}${usage})`
         })
         return [{
           type: 'text',
@@ -172,6 +180,7 @@ export function defineTeamStatusTool(deps: TeamStatusDeps): ToolDefinition {
         effort: row.effort,
         dispatched: row.dispatched,
         running: row.running,
+        failed: row.failed,
         ...row.usage === undefined ? {} : { usage: row.usage },
       }))
       return Promise.resolve({

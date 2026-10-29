@@ -1,19 +1,15 @@
 /**
- * Experimental team orchestrator: a configuration-declared role table resolves
+ * Role-pinned team delegation: a configuration-declared role table resolves
  * task kinds to per-role child LLM routes. Roles are host-pinned data — the
  * model never names a route. The `team_dispatch` tool and the captain prompt
- * section mount when the configured subagent provider registers.
+ * section mount when the configured subagent provider registers, and failed
+ * primary children escalate once to their role's fallback route.
  *
  * @module @deepseek-ai/dsh-team-orchestrator
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { Session } from '@deepseek-ai/dsh-session'
-// The token-meter service registers the shared `tokenUsage` projection when it
-// mounts; these imports only load the state-map and `Context.sessionProjections`
-// augmentations the reads below rely on.
-import '@deepseek-ai/dsh-token-meter'
-import type {} from '@deepseek-ai/dsh-session-projection'
 import type { SubagentProvider } from '@deepseek-ai/dsh-subagent'
 import type { SubagentRunEndInfo } from '@deepseek-ai/dsh-subagent'
 import type { Config } from './config.ts'
@@ -30,14 +26,17 @@ import {
   type DispatchRecord,
 } from './dispatch.ts'
 import { defineTeamStatusTool } from './status.ts'
+import { teamUsageProjectionDefinition } from './usage-projection.ts'
 
-export type { Config, RoleConfig } from './config.ts'
+export type { Config, RoleConfig, FallbackConfig } from './config.ts'
 export { resolveRoles, resolveTaskKind, validateRoleRoutes } from './roles.ts'
 export type { ResolvedRole } from './roles.ts'
 export { composeDispatchPrompt, captainSectionText, defineTeamDispatchTool } from './dispatch.ts'
 export type { DispatchArgs, DispatchRecord, TeamDispatchDeps, UsageSnapshot } from './dispatch.ts'
 export { defineTeamStatusTool, roleStatusRows } from './status.ts'
 export type { RoleStatus, TeamStatusDeps } from './status.ts'
+export { teamUsageProjectionDefinition } from './usage-projection.ts'
+export type { TeamUsageProjection, TeamUsageState } from './usage-projection.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -65,6 +64,7 @@ export class TeamOrchestrator extends Service {
   private readonly dispatchRecords: DispatchRecord[] = []
   private readonly settledChildren = new Set<string>()
   private readonly childSessions = new Map<string, Session>()
+  private disposeUsageProjection: (() => void) | undefined
 
   constructor(ctx: Context, config: Config) {
     super(ctx, 'teamOrchestrator')
@@ -98,14 +98,23 @@ export class TeamOrchestrator extends Service {
   }
 
   /**
-   * Capture settled children's provider-reported usage off the shared
-   * `tokenUsage` projection. The child's live Session is retained at
-   * `subagent/start` — which precedes the dispatch tool's own registry write,
-   * so retention is not gated on a recorded dispatch — and released at the
-   * paired end. A held Session's committed events stay foldable after child
-   * disposal, so the end edge reads final totals.
+   * Capture settled children's provider-reported usage off this package's own
+   * usage projection (keyed independently of the harness token-meter's
+   * `tokenUsage` unit, which published DSH releases register themselves). The
+   * child's live Session is retained at `subagent/start` — which precedes the
+   * dispatch tool's own registry write, so retention is not gated on a
+   * recorded dispatch — and released at the paired end. A held Session's
+   * committed events stay foldable after child disposal, so the end edge reads
+   * final totals.
    */
   private initUsageCapture(): void {
+    try {
+      const dispose = this.ctx.sessionProjections.register(teamUsageProjectionDefinition)
+      this.disposeUsageProjection = dispose
+      this.ctx.effect(() => () => { this.disposeUsageProjection?.() })
+    } catch (error) {
+      this.ctx.logger.error('team-orchestrator: token usage projection unavailable: %s', error)
+    }
     this.ctx.effect(() => this.ctx.on('subagent/start', (info) => {
       const session = this.ctx.agents.get(info.id)?.session
       if (session !== undefined) this.childSessions.set(info.id, session)
@@ -122,7 +131,7 @@ export class TeamOrchestrator extends Service {
     const session = this.childSessions.get(info.id)
     this.childSessions.delete(info.id)
     if (record === undefined || session === undefined || record.usage !== undefined) return
-    const state = this.ctx.sessionProjections.stateOf(session, 'tokenUsage')
+    const state = this.ctx.sessionProjections.stateOf(session, 'teamOrchestratorUsage')
     if (state === undefined) return
     record.usage = { ...state.totals }
   }
@@ -164,9 +173,11 @@ export class TeamOrchestrator extends Service {
           releaseDispatch: () => { this.releaseDispatch() },
           recordDispatch: (entry) => { this.recordDispatch(entry) },
           markSettled: (childId) => { this.markSettled(childId) },
+          markOutcome: (childId, outcome) => { this.markOutcome(childId, outcome) },
           recentLabelsFor: (kind, excludeChildId) => this.recentLabelsFor(kind, excludeChildId),
         },
         llm: this.ctx.llm,
+        onWarn: (message) => { this.ctx.logger.warn(message) },
       })
       const statusDefinition = defineTeamStatusTool({
         kinds: this.kinds,
@@ -185,6 +196,9 @@ export class TeamOrchestrator extends Service {
         }
       })
       const disposeSection = this.ctx.systemPrompt.section({
+        // TOOL_TEAM_DISPATCH does not exist in published dsh-system-prompt
+        // releases yet; the delegation guidance therefore shares the subagent
+        // placement until a release carries the dedicated order name.
         name: 'team-orchestrator:captain',
         order: this.ctx.systemPrompt.getSectionOrder('TOOL_SUBAGENT'),
         text: (context) => {
@@ -263,6 +277,16 @@ export class TeamOrchestrator extends Service {
    */
   markSettled(childId: string): void {
     this.settledChildren.add(childId)
+  }
+
+  /**
+   * Record the terminal outcome of one dispatch's child.
+   * @param childId - the settled child's session id.
+   * @param outcome - the child run's terminal stop reason.
+   */
+  markOutcome(childId: string, outcome: string): void {
+    const record = this.dispatchRecords.find(entry => entry.childId === childId)
+    if (record !== undefined) record.outcome = outcome
   }
 
   /**

@@ -1,7 +1,8 @@
 /**
  * The model-facing `team_dispatch` tool: kind-routed delegation through the
  * configured role table. The model declares what kind of task it is dispatching
- * and writes the brief; the plugin owns which role and route runs it.
+ * and writes the brief; the plugin owns which role and route runs it, and
+ * escalates once to the role's fallback route when the primary child fails.
  *
  * @module @deepseek-ai/dsh-team-orchestrator/dispatch
  */
@@ -38,11 +39,15 @@ export interface TeamDispatchDeps {
         recordDispatch(entry: DispatchRecord): void;
         /** Mark one recorded dispatch settled when its child run settles. */
         markSettled(childId: string): void;
+        /** Record the terminal outcome of one dispatch's child. */
+        markOutcome(childId: string, outcome: string): void;
         /** Recent labels already dispatched for one kind, newest first. */
         recentLabelsFor(kind: string, excludeChildId?: string): readonly string[];
     };
     /** Live LLM runtime for the dispatch-time route preflight. */
     readonly llm: RouteValidatingLlm;
+    /** Warn sink for fallback escalation that could not start; absent logs nothing. */
+    readonly onWarn?: (message: string) => void;
 }
 /** One recorded dispatch, for `team_status` reporting. */
 export interface DispatchRecord {
@@ -52,10 +57,14 @@ export interface DispatchRecord {
     readonly kind: string;
     /** The routed role id. */
     readonly role: string;
-    /** The role's pinned model id. */
+    /** The pinned model id this attempt ran on. */
     readonly model: string;
     /** The dispatcher's short display label. */
     readonly label: string;
+    /** Whether this attempt is the role's primary route or its fallback escalation. */
+    readonly route: 'primary' | 'fallback';
+    /** The child's terminal stop reason; absent until the run settles. */
+    outcome?: string;
     /** Provider-reported usage captured when the child settled; absent until then or when the child session is unreadable. */
     usage?: UsageSnapshot;
 }

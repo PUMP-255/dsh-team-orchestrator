@@ -1,13 +1,14 @@
 /**
  * The model-facing `team_status` tool: one snapshot of the dispatch registry —
- * concurrency against the cap and per-role dispatch counts. Registry state is
- * this process's in-memory record; it does not survive restarts and does not
- * include token usage (deferred until a cross-session usage read exists).
+ * concurrency against the cap, per-role dispatch counts, and summed
+ * provider-reported token usage of settled dispatches. Registry state is this
+ * process's in-memory record; it does not survive restarts.
  *
  * @module @deepseek-ai/dsh-team-orchestrator/status
  */
 import { type ToolDefinition } from '@deepseek-ai/dsh-tools';
-import type { DispatchRecord, UsageSnapshot } from './dispatch.ts';
+import type { UsageSnapshot } from './dispatch.ts';
+import type { DispatchRecord } from './dispatch.ts';
 import type { ResolvedRole } from './roles.ts';
 /** The registry surface `team_status` reports; narrowed for direct unit testing. */
 export interface TeamStatusDeps {
@@ -36,6 +37,8 @@ export interface RoleStatus {
     readonly dispatched: number;
     /** Dispatches still running. */
     readonly running: number;
+    /** Settled dispatches whose child did not complete. */
+    readonly failed: number;
     /** Labels of this role's dispatches, newest first. */
     readonly labels: readonly string[];
     /** Summed provider-reported usage of this role's settled dispatches; absent when none settled readably. */

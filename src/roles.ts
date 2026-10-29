@@ -17,12 +17,19 @@ export interface ResolvedRole {
   readonly id: string
   /** The pinned exact child route, with every field required. */
   readonly route: Readonly<{ provider: string; model: string; reasoningEffort: ReturnType<typeof ReasoningEffortId> }>
-  /** Child Agent options carrying the pinned route. */
+  /** Child Agent options carrying the pinned route and output-token cap. */
   readonly options: AgentOptions
   /** Role discipline prepended to every delegated prompt; absent when undeclared. */
   readonly brief?: string
   /** Agent preset id the role's children join; absent when undeclared. */
   readonly preset?: string
+  /** The stronger escalation route; absent when the role declares no fallback. */
+  readonly fallback?: {
+    /** The exact escalation route. */
+    readonly route: Readonly<{ provider: string; model: string; reasoningEffort: ReturnType<typeof ReasoningEffortId> }>
+    /** Child Agent options carrying the escalation route. */
+    readonly options: AgentOptions
+  }
 }
 
 /**
@@ -43,12 +50,36 @@ export function resolveRoles(config: Config): ReadonlyMap<string, ResolvedRole> 
   const roles = new Map<string, ResolvedRole>()
   for (const [id, role] of roleEntries) {
     const reasoningEffort = ReasoningEffortId(role.reasoningEffort)
+    const route = { provider: role.provider, model: role.model, reasoningEffort }
+    let resolvedFallback: ResolvedRole['fallback']
+    if (role.fallback !== undefined) {
+      const fallbackRoute = {
+        provider: role.fallback.provider,
+        model: role.fallback.model,
+        reasoningEffort: ReasoningEffortId(role.fallback.reasoningEffort),
+      }
+      if (fallbackRoute.provider === route.provider
+        && fallbackRoute.model === route.model
+        && fallbackRoute.reasoningEffort === route.reasoningEffort) {
+        throw new Error(`team-orchestrator: role "${id}" declares a fallback identical to its primary route`)
+      }
+      resolvedFallback = {
+        route: fallbackRoute,
+        options: { ...role.maxTokens === undefined ? {} : { maxTokens: role.maxTokens }, ...fallbackRoute },
+      }
+    }
     roles.set(id, {
       id,
-      route: { provider: role.provider, model: role.model, reasoningEffort },
-      options: { provider: role.provider, model: role.model, reasoningEffort },
+      route,
+      options: {
+        ...role.maxTokens === undefined ? {} : { maxTokens: role.maxTokens },
+        provider: route.provider,
+        model: route.model,
+        reasoningEffort,
+      },
       ...role.brief === undefined ? {} : { brief: role.brief },
       ...role.preset === undefined ? {} : { preset: role.preset },
+      ...resolvedFallback === undefined ? {} : { fallback: resolvedFallback },
     })
   }
   for (const [kind, roleId] of routingEntries) {

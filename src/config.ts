@@ -9,6 +9,16 @@
 
 import z from '@deepseek-ai/schemastery'
 
+/** The stronger route a role escalates to when its primary child fails. */
+export interface FallbackConfig {
+  /** Registered LLM provider id. */
+  readonly provider: string
+  /** Provider-owned exact model id. */
+  readonly model: string
+  /** Adapter-owned reasoning effort id for this exact route. */
+  readonly reasoningEffort: string
+}
+
 /** One declared team role and its pinned child LLM route. */
 export interface RoleConfig {
   /** Registered LLM provider id. */
@@ -21,6 +31,10 @@ export interface RoleConfig {
   readonly brief?: string
   /** Agent preset id the role's children join; requires the agent-presets service and a provider with the agentPreset capability. */
   readonly preset?: string
+  /** Output-token ceiling per child request; caps runaway reasoning. */
+  readonly maxTokens?: number
+  /** Stronger route this role escalates to when its primary child settles without completing. */
+  readonly fallback?: FallbackConfig
 }
 
 /** The plugin's deployment configuration. */
@@ -48,6 +62,12 @@ export const ConfigSchema: z<Config> = z.object({
     reasoningEffort: z.string().min(1).required(),
     brief: z.string(),
     preset: z.string().min(1),
+    maxTokens: z.natural().min(1),
+    fallback: z.object({
+      provider: z.string().min(1).required(),
+      model: z.string().min(1).required(),
+      reasoningEffort: z.string().min(1).required(),
+    }),
   })).required(),
   taskRouting: z.dict(z.string().min(1)).required(),
   concurrency: z.natural().default(3),

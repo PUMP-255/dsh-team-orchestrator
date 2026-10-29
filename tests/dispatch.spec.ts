@@ -1,4 +1,4 @@
-/** Unit behavior of the `team_dispatch` tool: routing, briefing, gating, and output. */
+/** Unit behavior of the `team_dispatch` tool: routing, briefing, gating, fallback, and output. */
 import { describe, expect, it } from 'vitest'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { SubagentActivationSpec } from '@deepseek-ai/dsh-subagent'
@@ -11,13 +11,15 @@ import {
   composeDispatchPrompt,
   defineTeamDispatchTool,
 } from '../src/dispatch.ts'
-import type { DispatchRecord } from '../src/dispatch.ts'
 
 function config(overrides?: Partial<Config>): Config {
   return {
     provider: 'spawn',
     roles: {
-      planner: { provider: 'deepseek-official', model: 'm-strong', reasoningEffort: 'high', brief: 'Design first.' },
+      planner: {
+        provider: 'deepseek-official', model: 'm-strong', reasoningEffort: 'high', brief: 'Design first.',
+        fallback: { provider: 'deepseek-official', model: 'm-strongest', reasoningEffort: 'max' },
+      },
       coder: { provider: 'deepseek-official', model: 'm-fast', reasoningEffort: 'low' },
     },
     taskRouting: { plan: 'planner', implement: 'coder' },
@@ -26,11 +28,6 @@ function config(overrides?: Partial<Config>): Config {
     allowCaptainOverride: false,
     ...overrides,
   }
-}
-
-function configWithPreset(): Config {
-  const cfg = config()
-  return { ...cfg, roles: { ...cfg.roles, coder: { ...cfg.roles.coder!, preset: 'minimal' } } }
 }
 
 function roleFor(cfg: Config, roles: ReadonlyMap<string, ResolvedRole>): (kind: string) => ResolvedRole {
@@ -66,17 +63,24 @@ const NO_PRESET_PROVIDER = {
   inheritsParentContext: false,
 } as const
 
+interface ExecutableDefinition {
+  execute(args: unknown, exec: { signal: AbortSignal; agent?: object }): Promise<unknown>
+}
+
 interface Harness {
   readonly definition: ReturnType<typeof defineTeamDispatchTool>
   readonly started: SubagentActivationSpec[]
   readonly preflighted: string[]
   readonly records: DispatchRecord[]
+  readonly warnings: string[]
   readonly settled: Set<string>
   running(): number
-  settleAll(): void
-  /** Dispatch through the definition with only the fields execute reads. */
+  /** Resolve one child's result by its 1-based ordinal. */
+  settleChild(ordinal: number, stopReason: string): void
   dispatch(args: unknown, signal: AbortSignal): Promise<unknown>
 }
+
+type DispatchRecord = ReturnType<typeof defineTeamDispatchTool> extends never ? never : Parameters<Parameters<typeof defineTeamDispatchTool>[0]['team']['recordDispatch']>[0]
 
 function harness(overrides?: Partial<Config>): Harness {
   const cfg = config(overrides)
@@ -84,20 +88,20 @@ function harness(overrides?: Partial<Config>): Harness {
   const started: SubagentActivationSpec[] = []
   const preflighted: string[] = []
   const records: DispatchRecord[] = []
+  const warnings: string[] = []
   const settled = new Set<string>()
   let active = 0
-  const resolvers: Array<() => void> = []
+  const resolvers = new Map<number, (result: { output: never[]; stopReason: string }) => void>()
   const definition = defineTeamDispatchTool({
     provider: PROVIDER,
     subagents: {
       startActivation: async (spec) => {
         started.push(spec)
+        const ordinal = started.length
         return {
-          childId: SessionId(`child-${started.length}`),
+          childId: SessionId(`child-${ordinal}`),
           result: new Promise((resolve) => {
-            resolvers.push(() => {
-              resolve({ output: [], stopReason: 'completed' as const })
-            })
+            resolvers.set(ordinal, (result) => { resolve(result) })
           }),
           dispose: async () => undefined,
         }
@@ -116,6 +120,10 @@ function harness(overrides?: Partial<Config>): Harness {
       releaseDispatch: () => { active -= 1 },
       recordDispatch: (entry) => { records.unshift(entry) },
       markSettled: (childId) => { settled.add(childId) },
+      markOutcome: (childId, outcome) => {
+        const record = records.find(entry => entry.childId === childId)
+        if (record !== undefined) record.outcome = outcome
+      },
       recentLabelsFor: (kind, excludeChildId) => records
         .filter(record => record.kind === kind && record.childId !== excludeChildId)
         .map(record => record.label)
@@ -127,28 +135,36 @@ function harness(overrides?: Partial<Config>): Harness {
         return { ...call }
       },
     },
+    onWarn: (message) => { warnings.push(message) },
   })
   return {
     definition,
     started,
     preflighted,
     records,
+    warnings,
     settled,
     running: () => active,
-    settleAll: () => {
-      const pending = resolvers.splice(0, resolvers.length)
-      for (const resolve of pending) resolve()
+    settleChild: (ordinal, stopReason) => {
+      const resolve = resolvers.get(ordinal)
+      if (resolve === undefined) throw new Error(`child-${ordinal} has no pending result`)
+      resolvers.delete(ordinal)
+      resolve({ output: [], stopReason })
     },
     dispatch: (args, signal) => executeThrough(definition, args, signal),
   }
 }
 
-type NarrowExecute = (args: unknown, exec: { signal: AbortSignal; agent?: object }) => Promise<unknown>
-
 function executeThrough(definition: ReturnType<typeof defineTeamDispatchTool>, args: unknown, signal: AbortSignal): Promise<unknown> {
   // oxlint-disable-next-line typescript/unbound-method -- execute is an arrow property, never this-bound
   const executable = definition.execute as NarrowExecute
   return executable(args, { signal, agent: {} })
+}
+
+type NarrowExecute = (args: unknown, exec: { signal: AbortSignal; agent?: object }) => Promise<unknown>
+
+async function drained(times = 3): Promise<void> {
+  for (let index = 0; index < times; index += 1) await Promise.resolve()
 }
 
 describe('assertDispatchArgs', () => {
@@ -175,8 +191,8 @@ describe('team_dispatch dispatch', () => {
   it('routes the kind, carries the pinned route, and composes the brief', async () => {
     const h = harness()
     const result = await h.dispatch({ kind: 'plan', description: 'Design slugify', prompt: 'Plan the slugify module.' }, new AbortController().signal)
-    expect(result).toEqual({ kind: 'dispatch', subagentId: 'child-1', role: 'planner', model: 'm-strong', recent: [] })
-    expect(h.preflighted).toEqual(['deepseek-official/m-strong/high'])
+    expect(result).toEqual({ kind: 'dispatch', subagentId: 'child-1', role: 'planner', model: 'm-strong', escalates: true, recent: [] })
+    expect(h.preflighted).toEqual(['deepseek-official/m-strong/high', 'deepseek-official/m-strongest/max'])
     expect(h.started).toHaveLength(1)
     const spec = h.started[0]
     if (spec === undefined) throw new Error('dispatch did not start a child')
@@ -195,9 +211,7 @@ describe('team_dispatch dispatch', () => {
 
   it('rejects when no calling agent owns the dispatch', async () => {
     const h = harness()
-    // oxlint-disable-next-line typescript/unbound-method -- execute is an arrow property, never this-bound
-    const executable = h.definition.execute as (args: unknown, exec: { signal: AbortSignal }) => Promise<unknown>
-    await expect(executable({ kind: 'plan', description: 'd', prompt: 'p' }, { signal: new AbortController().signal }))
+    await expect((h.definition as ExecutableDefinition).execute({ kind: 'plan', description: 'd', prompt: 'p' }, { signal: new AbortController().signal }))
       .rejects.toThrow('requires a calling agent')
   })
 
@@ -207,16 +221,15 @@ describe('team_dispatch dispatch', () => {
     await h.dispatch({ kind: 'plan', description: 'a', prompt: 'p' }, signal)
     await expect(h.dispatch({ kind: 'plan', description: 'b', prompt: 'p' }, signal))
       .rejects.toThrow('1 dispatches already running (concurrency 1)')
-    h.settleAll()
-    await Promise.resolve()
-    await Promise.resolve()
+    h.settleChild(1, 'completed')
+    await drained()
     expect(h.running()).toBe(0)
     await h.dispatch({ kind: 'implement', description: 'c', prompt: 'p' }, signal)
     expect(h.started).toHaveLength(2)
   })
 
   it('releases the slot when the preflight rejects', async () => {
-    const cfg = config()
+    const cfg = config({ roles: { planner: { provider: 'deepseek-official', model: 'm-strong', reasoningEffort: 'high' }, coder: { provider: 'deepseek-official', model: 'm-fast', reasoningEffort: 'low' } } })
     const roles = resolveRoles(cfg)
     let active = 0
     const failing = defineTeamDispatchTool({
@@ -230,6 +243,7 @@ describe('team_dispatch dispatch', () => {
         releaseDispatch: () => { active -= 1 },
         recordDispatch: () => undefined,
         markSettled: () => undefined,
+        markOutcome: () => undefined,
         recentLabelsFor: () => [],
       },
       llm: { resolveCallConfig: async () => { throw new Error('route drifted') } },
@@ -239,17 +253,16 @@ describe('team_dispatch dispatch', () => {
     expect(active).toBe(0)
   })
 
-  it('records accepted dispatches and marks them settled', async () => {
+  it('records accepted dispatches with their route and settled outcome', async () => {
     const h = harness()
     await h.dispatch({ kind: 'plan', description: 'Design it', prompt: 'p' }, new AbortController().signal)
     expect(h.records).toEqual([
-      { childId: 'child-1', kind: 'plan', role: 'planner', model: 'm-strong', label: 'Design it' },
+      { childId: 'child-1', kind: 'plan', role: 'planner', model: 'm-strong', label: 'Design it', route: 'primary' },
     ])
-    expect(h.settled.size).toBe(0)
-    h.settleAll()
-    await Promise.resolve()
-    await Promise.resolve()
+    h.settleChild(1, 'completed')
+    await drained()
     expect(h.settled.has('child-1')).toBe(true)
+    expect(h.records[0]?.outcome).toBe('completed')
   })
 
   it('lists recent labels of the same kind, excluding the current child', async () => {
@@ -266,60 +279,6 @@ describe('team_dispatch dispatch', () => {
     const schema = { type: 'object' as const, properties: { steps: { type: 'array' as const, items: { type: 'string' as const } } }, required: ['steps'], additionalProperties: false }
     await h.dispatch({ kind: 'plan', description: 'd', prompt: 'p', output_schema: schema }, new AbortController().signal)
     expect(h.started[0]?.request.outputSchema).toEqual(schema)
-  })
-
-  it('carries the role preset and the resolved depth cap into the child request', async () => {
-    const cfg = configWithPreset()
-    const roles = resolveRoles(cfg)
-    const started: SubagentActivationSpec[] = []
-    const definition = defineTeamDispatchTool({
-      provider: PROVIDER,
-      subagents: {
-        startActivation: async (spec) => {
-          started.push(spec)
-          return {
-            childId: SessionId(`child-${started.length}`),
-            result: Promise.resolve({ output: [], stopReason: 'completed' as const }),
-            dispose: async () => undefined,
-          }
-        },
-      },
-      maxDepth: 4,
-      team: {
-        kinds: Object.keys(cfg.taskRouting),
-        roleFor: roleFor(cfg, roles),
-        roleForKinds: () => Object.keys(cfg.taskRouting).map(kind => roleFor(cfg, roles)(kind)),
-        admitDispatch: () => undefined,
-        releaseDispatch: () => undefined,
-        recordDispatch: () => undefined,
-        markSettled: () => undefined,
-        recentLabelsFor: () => [],
-      },
-      llm: { resolveCallConfig: async call => ({ ...call }) },
-    })
-    await executeThrough(definition, { kind: 'implement', description: 'd', prompt: 'p' }, new AbortController().signal)
-    expect(started[0]?.request.agentPreset).toBe('minimal')
-    expect(started[0]?.request.maxDepth).toBe(4)
-  })
-
-  it('rejects definition when a role declares a preset the provider cannot honor', () => {
-    const cfg = configWithPreset()
-    const roles = resolveRoles(cfg)
-    expect(() => defineTeamDispatchTool({
-      provider: NO_PRESET_PROVIDER,
-      subagents: { startActivation: async () => { throw new Error('unreachable') } },
-      team: {
-        kinds: Object.keys(cfg.taskRouting),
-        roleFor: roleFor(cfg, roles),
-        roleForKinds: () => Object.keys(cfg.taskRouting).map(kind => roleFor(cfg, roles)(kind)),
-        admitDispatch: () => undefined,
-        releaseDispatch: () => undefined,
-        recordDispatch: () => undefined,
-        markSettled: () => undefined,
-        recentLabelsFor: () => [],
-      },
-      llm: { resolveCallConfig: async call => ({ ...call }) },
-    })).toThrow('does not support child agent presets (roles with presets: "coder")')
   })
 
   it('rejects a non-object-rooted output schema at the tool boundary', async () => {
@@ -343,12 +302,127 @@ describe('team_dispatch dispatch', () => {
         releaseDispatch: () => undefined,
         recordDispatch: () => undefined,
         markSettled: () => undefined,
+        markOutcome: () => undefined,
         recentLabelsFor: () => [],
       },
       llm: { resolveCallConfig: async call => ({ ...call }) },
     })
     await expect(executeThrough(noSchema, { kind: 'plan', description: 'd', prompt: 'p', output_schema: { type: 'object' } }, new AbortController().signal))
       .rejects.toThrow('does not support structured child output')
+  })
+
+  it('carries the role preset and the resolved depth cap into the child request', async () => {
+    const cfg = config()
+    const presetCfg: Config = { ...cfg, roles: { ...cfg.roles, coder: { ...cfg.roles.coder!, preset: 'minimal' } } }
+    const roles = resolveRoles(presetCfg)
+    const started: SubagentActivationSpec[] = []
+    const definition = defineTeamDispatchTool({
+      provider: PROVIDER,
+      subagents: {
+        startActivation: async (spec) => {
+          started.push(spec)
+          return {
+            childId: SessionId(`child-${started.length}`),
+            result: Promise.resolve({ output: [], stopReason: 'completed' as const }),
+            dispose: async () => undefined,
+          }
+        },
+      },
+      maxDepth: 4,
+      team: {
+        kinds: Object.keys(presetCfg.taskRouting),
+        roleFor: roleFor(presetCfg, roles),
+        roleForKinds: () => Object.keys(presetCfg.taskRouting).map(kind => roleFor(presetCfg, roles)(kind)),
+        admitDispatch: () => undefined,
+        releaseDispatch: () => undefined,
+        recordDispatch: () => undefined,
+        markSettled: () => undefined,
+        markOutcome: () => undefined,
+        recentLabelsFor: () => [],
+      },
+      llm: { resolveCallConfig: async call => ({ ...call }) },
+    })
+    await executeThrough(definition, { kind: 'implement', description: 'd', prompt: 'p' }, new AbortController().signal)
+    expect(started[0]?.request.agentPreset).toBe('minimal')
+    expect(started[0]?.request.maxDepth).toBe(4)
+  })
+
+  it('rejects definition when a role declares a preset the provider cannot honor', () => {
+    const cfg = config()
+    const presetCfg: Config = { ...cfg, roles: { ...cfg.roles, coder: { ...cfg.roles.coder!, preset: 'minimal' } } }
+    const roles = resolveRoles(presetCfg)
+    expect(() => defineTeamDispatchTool({
+      provider: NO_PRESET_PROVIDER,
+      subagents: { startActivation: async () => { throw new Error('unreachable') } },
+      team: {
+        kinds: Object.keys(presetCfg.taskRouting),
+        roleFor: roleFor(presetCfg, roles),
+        roleForKinds: () => Object.keys(presetCfg.taskRouting).map(kind => roleFor(presetCfg, roles)(kind)),
+        admitDispatch: () => undefined,
+        releaseDispatch: () => undefined,
+        recordDispatch: () => undefined,
+        markSettled: () => undefined,
+        markOutcome: () => undefined,
+        recentLabelsFor: () => [],
+      },
+      llm: { resolveCallConfig: async call => ({ ...call }) },
+    })).toThrow('does not support child agent presets (roles with presets: "coder")')
+  })
+})
+
+describe('fallback escalation', () => {
+  it('re-dispatches a failed primary child on the fallback route', async () => {
+    const h = harness({ concurrency: 3 })
+    await h.dispatch({ kind: 'plan', description: 'Design it', prompt: 'p' }, new AbortController().signal)
+    h.settleChild(1, 'max-tokens')
+    await drained()
+    expect(h.started).toHaveLength(2)
+    const fallback = h.started[1]
+    if (fallback === undefined) throw new Error('fallback did not start')
+    expect(fallback.label).toBe('Design it (fallback)')
+    expect(fallback.request.agentOptions).toEqual({ provider: 'deepseek-official', model: 'm-strongest', reasoningEffort: 'max' })
+    expect(fallback.request.prompt[0]).toMatchObject({ type: 'text' })
+    const text = (fallback.request.prompt[0] as { text: string }).text
+    expect(text).toContain('stop reason: max-tokens')
+    expect(text).toContain('escalation running a stronger model')
+    expect(h.records[0]).toMatchObject({ childId: 'child-2', route: 'fallback', label: 'Design it (fallback)', kind: 'plan' })
+    expect(h.records[1]).toMatchObject({ childId: 'child-1', route: 'primary', outcome: 'max-tokens' })
+    h.settleChild(2, 'completed')
+    await drained()
+    expect(h.records[0]?.outcome).toBe('completed')
+    expect(h.running()).toBe(0)
+  })
+
+  it('does not escalate a completed or cancelled primary child', async () => {
+    const h = harness({ concurrency: 3 })
+    await h.dispatch({ kind: 'plan', description: 'a', prompt: 'p' }, new AbortController().signal)
+    h.settleChild(1, 'completed')
+    await drained()
+    expect(h.started).toHaveLength(1)
+    await h.dispatch({ kind: 'plan', description: 'b', prompt: 'p' }, new AbortController().signal)
+    h.settleChild(2, 'aborted')
+    await drained()
+    expect(h.started).toHaveLength(2)
+    expect(h.warnings).toEqual([])
+  })
+
+  it('does not escalate when the role declares no fallback', async () => {
+    const h = harness({ concurrency: 3 })
+    await h.dispatch({ kind: 'implement', description: 'a', prompt: 'p' }, new AbortController().signal)
+    h.settleChild(1, 'error')
+    await drained()
+    expect(h.started).toHaveLength(1)
+    expect(h.records[0]?.outcome).toBe('error')
+  })
+
+  it('never escalates the fallback attempt itself', async () => {
+    const h = harness({ concurrency: 3 })
+    await h.dispatch({ kind: 'plan', description: 'a', prompt: 'p' }, new AbortController().signal)
+    h.settleChild(1, 'error')
+    await drained()
+    h.settleChild(2, 'error')
+    await drained()
+    expect(h.started).toHaveLength(2)
   })
 })
 
@@ -359,6 +433,6 @@ describe('captainSectionText', () => {
     const text = captainSectionText(Object.keys(cfg.taskRouting), roleFor(cfg, roles))
     expect(text).toContain('`plan` → role `planner` (`m-strong` at `high` reasoning effort)')
     expect(text).toContain('`implement` → role `coder` (`m-fast` at `low` reasoning effort)')
-    expect(text).toContain('end your turn instead of polling')
+    expect(text).toContain('implementer of last resort')
   })
 })

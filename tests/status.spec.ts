@@ -48,8 +48,8 @@ describe('roleStatusRows', () => {
   it('folds the registry into role-declaration-order rows and sums captured usage', () => {
     const rows = roleStatusRows(deps())
     expect(rows).toEqual([
-      { role: 'planner', model: 'm-strong', effort: 'high', dispatched: 1, running: 1, labels: ['First'], usage: USAGE_A },
-      { role: 'coder', model: 'm-fast', effort: 'low', dispatched: 1, running: 1, labels: ['Second'], usage: USAGE_B },
+      { role: 'planner', model: 'm-strong', effort: 'high', dispatched: 1, running: 1, failed: 0, labels: ['First'], usage: USAGE_A },
+      { role: 'coder', model: 'm-fast', effort: 'low', dispatched: 1, running: 1, failed: 0, labels: ['Second'], usage: USAGE_B },
     ])
   })
 
@@ -95,8 +95,8 @@ describe('team_status execute', () => {
       running: 1,
       concurrency: 2,
       roles: [
-        { role: 'planner', model: 'm-strong', effort: 'high', dispatched: 1, running: 1, usage: USAGE_A },
-        { role: 'coder', model: 'm-fast', effort: 'low', dispatched: 1, running: 1, usage: USAGE_B },
+        { role: 'planner', model: 'm-strong', effort: 'high', dispatched: 1, running: 1, failed: 0, usage: USAGE_A },
+        { role: 'coder', model: 'm-fast', effort: 'low', dispatched: 1, running: 1, failed: 0, usage: USAGE_B },
       ],
     })
   })

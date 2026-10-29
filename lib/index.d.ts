@@ -1,23 +1,25 @@
 /**
- * Experimental team orchestrator: a configuration-declared role table resolves
+ * Role-pinned team delegation: a configuration-declared role table resolves
  * task kinds to per-role child LLM routes. Roles are host-pinned data — the
  * model never names a route. The `team_dispatch` tool and the captain prompt
- * section mount when the configured subagent provider registers.
+ * section mount when the configured subagent provider registers, and failed
+ * primary children escalate once to their role's fallback route.
  *
  * @module @deepseek-ai/dsh-team-orchestrator
  */
 import { Context, Service } from '@deepseek-ai/cordis';
-import '@deepseek-ai/dsh-token-meter';
 import type { Config } from './config.ts';
 import { type ResolvedRole } from './roles.ts';
 import { type DispatchRecord } from './dispatch.ts';
-export type { Config, RoleConfig } from './config.ts';
+export type { Config, RoleConfig, FallbackConfig } from './config.ts';
 export { resolveRoles, resolveTaskKind, validateRoleRoutes } from './roles.ts';
 export type { ResolvedRole } from './roles.ts';
 export { composeDispatchPrompt, captainSectionText, defineTeamDispatchTool } from './dispatch.ts';
 export type { DispatchArgs, DispatchRecord, TeamDispatchDeps, UsageSnapshot } from './dispatch.ts';
 export { defineTeamStatusTool, roleStatusRows } from './status.ts';
 export type { RoleStatus, TeamStatusDeps } from './status.ts';
+export { teamUsageProjectionDefinition } from './usage-projection.ts';
+export type { TeamUsageProjection, TeamUsageState } from './usage-projection.ts';
 declare module '@deepseek-ai/cordis' {
     interface Context {
         /** Role-pinned team delegation. */
@@ -41,6 +43,7 @@ export declare class TeamOrchestrator extends Service {
     private readonly dispatchRecords;
     private readonly settledChildren;
     private readonly childSessions;
+    private disposeUsageProjection;
     constructor(ctx: Context, config: Config);
     protected [Service.init](): Promise<void>;
     /**
@@ -49,12 +52,14 @@ export declare class TeamOrchestrator extends Service {
      */
     private initPresetValidation;
     /**
-     * Capture settled children's provider-reported usage off the shared
-     * `tokenUsage` projection. The child's live Session is retained at
-     * `subagent/start` — which precedes the dispatch tool's own registry write,
-     * so retention is not gated on a recorded dispatch — and released at the
-     * paired end. A held Session's committed events stay foldable after child
-     * disposal, so the end edge reads final totals.
+     * Capture settled children's provider-reported usage off this package's own
+     * usage projection (keyed independently of the harness token-meter's
+     * `tokenUsage` unit, which published DSH releases register themselves). The
+     * child's live Session is retained at `subagent/start` — which precedes the
+     * dispatch tool's own registry write, so retention is not gated on a
+     * recorded dispatch — and released at the paired end. A held Session's
+     * committed events stay foldable after child disposal, so the end edge reads
+     * final totals.
      */
     private initUsageCapture;
     /**
@@ -95,6 +100,12 @@ export declare class TeamOrchestrator extends Service {
      * @param childId - the settled child's session id.
      */
     markSettled(childId: string): void;
+    /**
+     * Record the terminal outcome of one dispatch's child.
+     * @param childId - the settled child's session id.
+     * @param outcome - the child run's terminal stop reason.
+     */
+    markOutcome(childId: string, outcome: string): void;
     /**
      * Recent labels already dispatched for one kind, newest first.
      * @param kind - the task kind to look up.
