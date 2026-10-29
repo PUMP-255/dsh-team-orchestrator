@@ -47,7 +47,7 @@
     maxDepth: provider-managed
 ```
 
-挂载时拒绝空角色表、空路由表,以及指向未声明角色的路由项。每条声明的路由都会对照运行中的 LLM 运行时校验——provider 查找、精确模型元数据、思考强度可许性——在初始化时执行;provider 适配器尚未注册的路由推迟到下一次 `llm/adapters-updated` 事件,无效路由在该处失败。声明的角色 preset 在初始化时校验:agent-presets 服务未挂载或 preset id 无法解析即拒绝。数值型 `maxDepth` 在 provider 注册时校验,provider 缺少 depthLimit 能力即拒绝。
+挂载时拒绝空角色表、空路由表,以及指向未声明角色的路由项。每条声明的路由都会对照运行中的 LLM 运行时校验——provider 查找、精确模型元数据、思考强度可许性——在初始化时执行;provider 适配器尚未注册的路由推迟到下一次 `llm/adapters-updated` 事件,无效路由在该处失败。声明的角色 preset 在初始化时校验:agent-presets 服务未挂载或 preset id 无法解析即拒绝;agent-preset 能力要求 dsh 宿主 ≥0.2.1-rc.1(更旧的宿主只在角色确实声明 preset 时才拒绝挂载——随包默认配置不声明)。数值型 `maxDepth` 在 provider 注册时校验,provider 缺少 depthLimit 能力即拒绝。
 
 ### 兜底升级
 

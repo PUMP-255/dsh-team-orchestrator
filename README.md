@@ -47,7 +47,7 @@ Declare roles and task-kind routing in the composition (cordis.yml or an overlay
     maxDepth: provider-managed
 ```
 
-Mount rejects an empty role table, an empty routing map, and any routing entry naming an undeclared role. Every declared route is validated against the live LLM runtime — provider lookup, exact-model metadata, and effort admissibility — at init, or on the next `llm/adapters-updated` event for routes whose provider adapter has not registered yet; an invalid route fails there. A declared role preset rejects at init unless the agent-presets service is mounted and the preset id resolves. A numeric `maxDepth` rejects at provider registration when the provider lacks the depthLimit capability.
+Mount rejects an empty role table, an empty routing map, and any routing entry naming an undeclared role. Every declared route is validated against the live LLM runtime — provider lookup, exact-model metadata, and effort admissibility — at init, or on the next `llm/adapters-updated` event for routes whose provider adapter has not registered yet; an invalid route fails there. A declared role preset rejects at init unless the agent-presets service is mounted and the preset id resolves; the agent-preset capability requires a dsh host at 0.2.1-rc.1 or newer (older hosts refuse the mount only when a role actually declares a preset — the shipped default configuration does not). A numeric `maxDepth` rejects at provider registration when the provider lacks the depthLimit capability.
 
 ### Fallback escalation
 

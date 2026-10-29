@@ -1,7 +1,10 @@
 {
   "name": "@deepseek-ai/dsh-team-orchestrator",
   "description": "Role-pinned team delegation: config-declared roles resolve task kinds to per-role model routes",
-  "version": "0.1.0-rc.2",
+  "version": "0.1.0-rc.3",
+  "engines": {
+    "dsh": ">=0.2.0-rc.2"
+  },
   "publishConfig": {
     "access": "public"
   },
