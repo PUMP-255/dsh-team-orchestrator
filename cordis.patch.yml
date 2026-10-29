@@ -1,0 +1,59 @@
+# dsh-team-orchestrator bundle patch: mounts the role-pinned team delegation
+# plugin into the host composition of a dsh profile. The plugin registers the
+# `team_dispatch` / `team_status` tools and one captain section into the global
+# system prompt, so every session of the profile can drive the team through
+# natural language.
+#
+# Install: `dsh plugin --profile <name> add @deepseek-ai/dsh-team-orchestrator`
+# (npm) or `dsh plugin --profile <name> add <path-or-tgz>`. The `dsh plugin`
+# command pnpm-installs the package into the profile and reconciles it into the
+# profile's `dsh.profile.bundles` layer list; the plugin manager shows it with
+# an enable toggle.
+#
+# The default configuration is the pilot-campaign recipe (weak-model matrix
+# with strong-model escalation: all-weak roles resolved 9/9 tasks at 1/13th
+# the cost of all-strong). Tune roles, routes, and fallbacks through the
+# config editor or an overlay; see README.md and examples/.
+#
+# Node-resolvable package name — must stay in sync with package.json `name`.
+# Quoted because `@` is a reserved indicator in YAML and cannot open a plain
+# scalar.
+- insert:
+    - id: team-orchestrator
+      name: '@deepseek-ai/dsh-team-orchestrator'
+      config:
+        provider: spawn
+        roles:
+          planner:
+            provider: deepseek-official
+            model: deepseek-flash
+            reasoningEffort: low
+            brief: You are the planning role. Produce a complete, directly implementable brief.
+            fallback:
+              provider: deepseek-official
+              model: deepseek-v4-pro
+              reasoningEffort: high
+          coder:
+            provider: deepseek-official
+            model: deepseek-flash
+            reasoningEffort: low
+            brief: You are the implementation role. Follow the brief exactly; make no design decisions.
+            maxTokens: 65536
+            fallback:
+              provider: deepseek-official
+              model: deepseek-v4-pro
+              reasoningEffort: high
+          reviewer:
+            provider: deepseek-official
+            model: deepseek-flash
+            reasoningEffort: low
+            brief: You are the review role. Review correctness, edge cases, and style; report findings only.
+            fallback:
+              provider: deepseek-official
+              model: deepseek-v4-pro
+              reasoningEffort: high
+        taskRouting:
+          plan: planner
+          implement: coder
+          review: reviewer
+        concurrency: 3

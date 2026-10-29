@@ -17,14 +17,28 @@
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
     },
+    "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
   "files": [
+    "cordis.patch.yml",
     "examples/*.patch.yml",
     "lib"
   ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "team-orchestrator",
+    "multi-agent"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc -p tsconfig.json",
     "test": "vitest run",
     "prepublishOnly": "npm run build && npm run test"
   },
