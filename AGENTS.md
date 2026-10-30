@@ -169,9 +169,21 @@ Everything else must stay byte-identical to upstream. Verify with
   An independent review caught the nested-schema fallback blocker (fixed, with
   `tests/config.spec.ts` as the regression); the three shipped/example patch
   configurations were also parsed by the real dsh loader (`dsh --dump-config`).
-  Real-API smoke for the mode path is not yet run; running it needs
-  `DEEPSEEK_API_KEY` (balance was empty at the last 402) and the plugin
-  reinstalled into `--profile orch`.
+  Real-API smoke for the mode path passed (2026-10-30, `--profile orch`, fresh
+  install of the 0.2.0-rc.1 tarball, shipped two-mode default config, no
+  overlay): the model called
+  `team_dispatch({mode: "strict", kind: "implement"})`; that child's session
+  header showed `deepseek-flash/low` + `maxTokens 65536` (strict/coder) and the
+  tool render read `dispatched in mode "strict" to role "coder"`. A second run
+  dispatched `{mode: "strict", kind: "review"}`; its child header showed
+  `deepseek-v4-pro/high` (strict/reviewer, where `fast` routes its reviewer to
+  flash/low), proving the mode actually selects the role's route.
+  `team_status` reported per-mode blocks with per-mode-role usage
+  (`strict/reviewer ... tokens in/out 13652/244`) and per-mode concurrency
+  (`fast 0/3, strict 0/2`). No fallback re-dispatch occurred; evidence lives in
+  the parent session logs under `~/.dsh/sessions/--D-projects-dsh-orch--/`.
+  The `orch` profile now carries 0.2.0-rc.1 (roll back with
+  `pnpm dsh plugin --profile orch add <0.1.0-rc.2 tarball>` if needed).
 - Installable through the plugin manager (bundle declaration + default-config
   patch verified against a 0.2.0-rc.2 desktop runtime; re-verify the new
   two-mode default config there after the next install).
