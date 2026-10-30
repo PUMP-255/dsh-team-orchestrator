@@ -1,15 +1,16 @@
 /**
- * The model-facing `team_dispatch` tool: kind-routed delegation through the
- * configured role table. The model declares what kind of task it is dispatching
- * and writes the brief; the plugin owns which role and route runs it, and
- * escalates once to the role's fallback route when the primary child fails.
+ * The model-facing `team_dispatch` tool: mode-and-kind-routed delegation through
+ * the configured team. The model selects a mode (where several are declared) and
+ * a task kind, and writes the brief; the plugin owns which roles exist, which
+ * model and reasoning effort each role runs on, and escalates once to the role's
+ * fallback route when the primary child fails.
  *
  * @module @deepseek-ai/dsh-team-orchestrator/dispatch
  */
 import { type ToolDefinition } from '@deepseek-ai/dsh-tools';
 import type { ObjectJsonSchema } from '@deepseek-ai/dsh-tools';
 import type { SubagentActivationSpec, SubagentActivation, SubagentProvider } from '@deepseek-ai/dsh-subagent';
-import type { ResolvedRole, RouteValidatingLlm } from './roles.ts';
+import type { ResolvedMode, ResolvedRole, ResolvedTeam, RouteValidatingLlm } from './roles.ts';
 /** The subagent-runtime surface dispatch needs; narrowed for direct unit testing. */
 export interface DispatchSubagents {
     /** Start one managed child activation through the named provider. */
@@ -21,28 +22,30 @@ export interface TeamDispatchDeps {
     readonly provider: SubagentProvider;
     /** The live subagent runtime that starts children. */
     readonly subagents: DispatchSubagents;
-    /** Resolved delegation-depth cap for dispatched children; absent leaves the budget to the provider. */
-    readonly maxDepth?: number;
-    /** The resolved role table's model-facing surface. */
+    /** Resolve one mode's delegation-depth cap; absent leaves the budget to the provider. */
+    depthFor(mode: string): number | undefined;
+    /** The resolved mode table's model-facing surface. */
     readonly team: {
-        /** Declared task kinds, in configuration order. */
+        /** Declared modes, in configuration order. */
+        readonly modes: readonly ResolvedMode[];
+        /** The mode a dispatch runs in when it omits `mode`. */
+        readonly defaultMode: ResolvedMode;
+        /** Every declared task kind across modes, in declaration order (the `kind` enum). */
         readonly kinds: readonly string[];
-        /** Resolve one kind to its routed role; rejects unknown kinds. */
-        roleFor(kind: string): ResolvedRole;
-        /** The routed roles of all declared kinds, in configuration order. */
-        roleForKinds(): readonly ResolvedRole[];
-        /** Take one concurrency slot; rejects when the cap is reached. */
-        admitDispatch(): void;
-        /** Return one concurrency slot when the dispatched child settles. */
-        releaseDispatch(): void;
+        /** Resolve one mode id; rejects an undeclared mode. */
+        modeFor(mode: string): ResolvedMode;
+        /** Recent labels already dispatched for one kind, newest first. */
+        recentLabelsFor(kind: string, excludeChildId?: string): readonly string[];
+        /** Take one concurrency slot in one mode; rejects when that mode's cap is reached. */
+        admitDispatch(mode: string): void;
+        /** Return one concurrency slot to one mode when the dispatched child settles. */
+        releaseDispatch(mode: string): void;
         /** Record one accepted dispatch for status reporting. */
         recordDispatch(entry: DispatchRecord): void;
         /** Mark one recorded dispatch settled when its child run settles. */
         markSettled(childId: string): void;
         /** Record the terminal outcome of one dispatch's child. */
         markOutcome(childId: string, outcome: string): void;
-        /** Recent labels already dispatched for one kind, newest first. */
-        recentLabelsFor(kind: string, excludeChildId?: string): readonly string[];
     };
     /** Live LLM runtime for the dispatch-time route preflight. */
     readonly llm: RouteValidatingLlm;
@@ -53,9 +56,11 @@ export interface TeamDispatchDeps {
 export interface DispatchRecord {
     /** The child agent's session id. */
     readonly childId: string;
+    /** The mode the dispatch ran in. */
+    readonly mode: string;
     /** The dispatched task kind. */
     readonly kind: string;
-    /** The routed role id. */
+    /** The routed role id within that mode. */
     readonly role: string;
     /** The pinned model id this attempt ran on. */
     readonly model: string;
@@ -81,6 +86,7 @@ export interface UsageSnapshot {
 }
 /** Validated `team_dispatch` arguments. */
 export interface DispatchArgs {
+    readonly mode?: string;
     readonly kind: string;
     readonly description: string;
     readonly prompt: string;
@@ -108,11 +114,10 @@ export declare function composeDispatchPrompt(role: ResolvedRole, prompt: string
  */
 export declare function defineTeamDispatchTool(deps: TeamDispatchDeps): ToolDefinition;
 /**
- * The captain prompt section text: the kind→role routing table and briefing
- * discipline, rendered only where the tool is visible.
- * @param kinds - declared task kinds in configuration order.
- * @param roleFor - kind-to-role resolver.
+ * The captain prompt section text: the mode table, its kind→role routes, and the
+ * briefing discipline, rendered only where the tool is visible.
+ * @param team - the resolved deployment.
  * @returns the section text.
  */
-export declare function captainSectionText(kinds: readonly string[], roleFor: (kind: string) => ResolvedRole): string;
+export declare function captainSectionText(team: ResolvedTeam): string;
 //# sourceMappingURL=dispatch.d.ts.map

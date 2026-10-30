@@ -1,0 +1,104 @@
+# 多模式示例:同一套插件,三种成本/流程档位,队长按任务选择。
+#
+# 模式是"一套完整团队":角色集合、每个角色的模型与思考强度、并发上限、
+# 深度上限都在模式内声明。因此 fast 根本没有 review 角色,
+# 选 fast 派发 review 会被拒绝并列出该模式支持的任务类型 —— 这是有意的:
+# 想评审就选带 reviewer 的模式。
+#
+# 队长在 team_dispatch 里传 mode:fast / balanced / strict;省略则用 defaultMode。
+# 每个模式的并发各自计数,互不占用。
+#
+# 用法:pnpm dsh --profile <profile> --patch modes.patch.yml "<任务>"
+
+- insert:
+    - id: team-orchestrator
+      name: '@deepseek-ai/dsh-team-orchestrator'
+      config:
+        provider: spawn
+        defaultMode: fast
+        modes:
+          # 最便宜:只有设计与实现两个角色,全部快模型。
+          fast:
+            brief: Deliver directly; no review stage exists in this mode, so check your own result.
+            concurrency: 4
+            roles:
+              planner:
+                provider: deepseek-official
+                model: deepseek-flash
+                reasoningEffort: low
+                brief: You are the planning role. Produce a complete, directly implementable brief.
+              coder:
+                provider: deepseek-official
+                model: deepseek-flash
+                reasoningEffort: low
+                brief: You are the implementation role. Follow the brief exactly; make no design decisions.
+                maxTokens: 65536
+            taskRouting:
+              plan: planner
+              implement: coder
+          # 均衡:加上快模型评审,失败再升级到强模型。
+          balanced:
+            brief: Have every implementation reviewed before you report completion.
+            concurrency: 3
+            roles:
+              planner:
+                provider: deepseek-official
+                model: deepseek-flash
+                reasoningEffort: low
+                brief: You are the planning role. Produce a complete, directly implementable brief.
+              coder:
+                provider: deepseek-official
+                model: deepseek-flash
+                reasoningEffort: low
+                brief: You are the implementation role. Follow the brief exactly; make no design decisions.
+                maxTokens: 65536
+                fallback:
+                  provider: deepseek-official
+                  model: deepseek-v4-pro
+                  reasoningEffort: high
+              reviewer:
+                provider: deepseek-official
+                model: deepseek-flash
+                reasoningEffort: low
+                brief: You are the review role. Review correctness, edge cases, and style; report findings only.
+            taskRouting:
+              plan: planner
+              implement: coder
+              review: reviewer
+          # 最严格:规划、评审、验证都在强模型上,并发减半。
+          strict:
+            brief: Every implementation is reviewed, and anything risky verified with the `verify` kind, before you report completion.
+            concurrency: 2
+            roles:
+              planner:
+                provider: deepseek-official
+                model: deepseek-v4-pro
+                reasoningEffort: high
+                brief: You are the planning role. Produce a complete, directly implementable brief.
+              coder:
+                provider: deepseek-official
+                model: deepseek-flash
+                reasoningEffort: low
+                brief: You are the implementation role. Follow the brief exactly; make no design decisions.
+                maxTokens: 65536
+                fallback:
+                  provider: deepseek-official
+                  model: deepseek-v4-pro
+                  reasoningEffort: high
+              reviewer:
+                provider: deepseek-official
+                model: deepseek-v4-pro
+                reasoningEffort: high
+                brief: You are the review role. Review correctness, edge cases, and style; report findings only.
+              verifier:
+                provider: deepseek-official
+                model: deepseek-v4-pro
+                reasoningEffort: high
+                brief: You are the verification role. Run the acceptance checks and report observed evidence, never intentions.
+                # 只读工具集一类的人格差异也按角色声明:
+                # preset: minimal-tools   # 需要宿主 ≥0.2.1-rc.1 且该 preset 存在
+            taskRouting:
+              plan: planner
+              implement: coder
+              review: reviewer
+              verify: verifier

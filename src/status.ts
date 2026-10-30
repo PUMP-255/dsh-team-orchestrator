@@ -1,8 +1,8 @@
 /**
  * The model-facing `team_status` tool: one snapshot of the dispatch registry —
- * concurrency against the cap, per-role dispatch counts, and summed
- * provider-reported token usage of settled dispatches. Registry state is this
- * process's in-memory record; it does not survive restarts.
+ * per-mode concurrency against each mode's cap, per-role dispatch counts, and
+ * summed provider-reported token usage of settled dispatches. Registry state is
+ * this process's in-memory record; it does not survive restarts.
  *
  * @module @deepseek-ai/dsh-team-orchestrator/status
  */
@@ -10,18 +10,16 @@
 import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type { UsageSnapshot } from './dispatch.ts'
 import type { DispatchRecord } from './dispatch.ts'
-import type { ResolvedRole } from './roles.ts'
+import type { ResolvedMode } from './roles.ts'
 
 /** The registry surface `team_status` reports; narrowed for direct unit testing. */
 export interface TeamStatusDeps {
-  /** Declared task kinds, in configuration order. */
-  readonly kinds: readonly string[]
-  /** Resolve one kind to its routed role. */
-  roleFor(kind: string): ResolvedRole
-  /** Dispatches currently running against the cap. */
-  runningDispatches(): number
-  /** Maximum concurrently running dispatched children. */
-  maxConcurrency(): number
+  /** Declared modes, in configuration order. */
+  readonly modes: readonly ResolvedMode[]
+  /** Dispatches currently running in one mode. */
+  runningDispatches(mode: string): number
+  /** One mode's concurrency cap. */
+  maxConcurrency(mode: string): number
   /** The dispatch registry snapshot, newest first. */
   readonly registry: readonly DispatchRecord[]
   /** Child ids recorded as settled. */
@@ -48,6 +46,18 @@ export interface RoleStatus {
   readonly usage?: UsageSnapshot
 }
 
+/** Per-mode status: one mode's cap, running count, and role rows. */
+export interface ModeStatus {
+  /** Mode id. */
+  readonly mode: string
+  /** Dispatches of this mode still running. */
+  readonly running: number
+  /** This mode's concurrency cap. */
+  readonly concurrency: number
+  /** Role rows of this mode, in the order its routing reaches them. */
+  readonly roles: readonly RoleStatus[]
+}
+
 /** Sum captured usage snapshots; undefined when no record carries one. */
 function sumUsage(records: readonly DispatchRecord[]): UsageSnapshot | undefined {
   const captured = records.filter(record => record.usage !== undefined)
@@ -70,14 +80,21 @@ function sumUsage(records: readonly DispatchRecord[]): UsageSnapshot | undefined
 }
 
 /**
- * Fold the registry into per-role status rows, in role-declaration order.
- * @param deps - status dependencies.
- * @returns one row per role reached through the routing table.
+ * Fold one mode's registry slice into per-role rows, in the order the mode's
+ * routing reaches roles.
+ * @param mode - the resolved mode.
+ * @param registry - the whole registry; records of other modes are ignored.
+ * @param settledChildIds - child ids recorded as settled.
+ * @returns one row per role the mode's routing reaches.
  */
-export function roleStatusRows(deps: TeamStatusDeps): readonly RoleStatus[] {
+function roleStatusRows(
+  mode: ResolvedMode,
+  registry: readonly DispatchRecord[],
+  settledChildIds: ReadonlySet<string>,
+): readonly RoleStatus[] {
   const rows = new Map<string, { row: RoleStatus; records: DispatchRecord[] }>()
-  for (const kind of deps.kinds) {
-    const role = deps.roleFor(kind)
+  for (const kind of mode.kinds) {
+    const role = mode.roleFor(kind)
     if (rows.has(role.id)) continue
     rows.set(role.id, {
       row: {
@@ -92,10 +109,11 @@ export function roleStatusRows(deps: TeamStatusDeps): readonly RoleStatus[] {
       records: [],
     })
   }
-  for (const record of deps.registry) {
+  for (const record of registry) {
+    if (record.mode !== mode.id) continue
     const entry = rows.get(record.role)
     if (entry === undefined) continue
-    const running = deps.settledChildIds.has(record.childId) ? 0 : 1
+    const running = settledChildIds.has(record.childId) ? 0 : 1
     const failed = record.outcome !== undefined && record.outcome !== 'completed' ? 1 : 0
     entry.records.push(record)
     entry.row = {
@@ -113,6 +131,29 @@ export function roleStatusRows(deps: TeamStatusDeps): readonly RoleStatus[] {
 }
 
 /**
+ * Fold the registry into per-mode status, in mode-declaration order.
+ * @param deps - status dependencies.
+ * @returns one entry per declared mode.
+ */
+export function modeStatusRows(deps: TeamStatusDeps): readonly ModeStatus[] {
+  return deps.modes.map(mode => ({
+    mode: mode.id,
+    running: deps.runningDispatches(mode.id),
+    concurrency: deps.maxConcurrency(mode.id),
+    roles: roleStatusRows(mode, deps.registry, deps.settledChildIds),
+  }))
+}
+
+/** One role row rendered as a line; `prefix` names the mode when several are declared. */
+function renderRoleRow(row: Omit<RoleStatus, 'labels'>, prefix: string): string {
+  const usage = row.usage === undefined
+    ? ''
+    : `; tokens in/out ${row.usage.uncachedInputTokens}/${row.usage.outputTokens}`
+  const failed = row.failed === 0 ? '' : `, ${row.failed} failed`
+  return `${prefix}${row.role}: ${row.running} running / ${row.dispatched} dispatched${failed} (${row.model} at ${row.effort}${usage})`
+}
+
+/**
  * Build the `team_status` tool definition.
  * @param deps - status dependencies.
  * @returns the tool definition.
@@ -120,7 +161,7 @@ export function roleStatusRows(deps: TeamStatusDeps): readonly RoleStatus[] {
 export function defineTeamStatusTool(deps: TeamStatusDeps): ToolDefinition {
   return defineTool({
     name: 'team_status',
-    description: 'Report the team dispatch registry: concurrency against the cap, per-role dispatch counts, and summed provider-reported token usage of settled dispatches. Registry state is this process\'s record.',
+    description: 'Report the team dispatch registry: each mode\'s concurrency against its cap, per-role dispatch counts, and summed provider-reported token usage of settled dispatches. Registry state is this process\'s record.',
     parameters: {},
     output: {
       schema: {
@@ -128,29 +169,40 @@ export function defineTeamStatusTool(deps: TeamStatusDeps): ToolDefinition {
         additionalProperties: false,
         properties: {
           kind: { type: 'string', required: true, const: 'status' },
-          running: { type: 'number', required: true },
-          concurrency: { type: 'number', required: true },
-          roles: {
+          modes: {
             type: 'array',
             required: true,
             items: {
               type: 'object',
               additionalProperties: false,
               properties: {
-                role: { type: 'string', required: true },
-                model: { type: 'string', required: true },
-                effort: { type: 'string', required: true },
-                dispatched: { type: 'number', required: true },
+                mode: { type: 'string', required: true },
                 running: { type: 'number', required: true },
-                failed: { type: 'number', required: true },
-                usage: {
-                  type: 'object',
-                  additionalProperties: false,
-                  properties: {
-                    uncachedInputTokens: { type: 'number', required: true },
-                    outputTokens: { type: 'number', required: true },
-                    cacheReadTokens: { type: 'number', required: true },
-                    cacheWriteTokens: { type: 'number', required: true },
+                concurrency: { type: 'number', required: true },
+                roles: {
+                  type: 'array',
+                  required: true,
+                  items: {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: {
+                      role: { type: 'string', required: true },
+                      model: { type: 'string', required: true },
+                      effort: { type: 'string', required: true },
+                      dispatched: { type: 'number', required: true },
+                      running: { type: 'number', required: true },
+                      failed: { type: 'number', required: true },
+                      usage: {
+                        type: 'object',
+                        additionalProperties: false,
+                        properties: {
+                          uncachedInputTokens: { type: 'number', required: true },
+                          outputTokens: { type: 'number', required: true },
+                          cacheReadTokens: { type: 'number', required: true },
+                          cacheWriteTokens: { type: 'number', required: true },
+                        },
+                      },
+                    },
                   },
                 },
               },
@@ -159,36 +211,31 @@ export function defineTeamStatusTool(deps: TeamStatusDeps): ToolDefinition {
         },
       },
       render: (_args, value) => {
-        const rows = value.roles.map((row) => {
-          const usage = row.usage === undefined
-            ? ''
-            : `; tokens in/out ${row.usage.uncachedInputTokens}/${row.usage.outputTokens}`
-          const failed = row.failed === 0 ? '' : `, ${row.failed} failed`
-          return `${row.role}: ${row.running} running / ${row.dispatched} dispatched${failed} (${row.model} at ${row.effort}${usage})`
-        })
-        return [{
-          type: 'text',
-          text: `dispatches ${value.running}/${value.concurrency} running\n${rows.join('\n')}`,
-        }]
+        const several = value.modes.length > 1
+        const header = several
+          ? `dispatches running: ${value.modes.map(mode => `${mode.mode} ${mode.running}/${mode.concurrency}`).join(', ')}`
+          : `dispatches ${value.modes[0]?.running ?? 0}/${value.modes[0]?.concurrency ?? 0} running`
+        const rows = value.modes.flatMap(mode => mode.roles.map(row => renderRoleRow(row, several ? `${mode.mode}/` : '')))
+        return [{ type: 'text', text: `${header}\n${rows.join('\n')}` }]
       },
     },
     isConcurrencySafe: () => true,
     execute() {
-      const roles = roleStatusRows(deps).map(row => ({
-        role: row.role,
-        model: row.model,
-        effort: row.effort,
-        dispatched: row.dispatched,
-        running: row.running,
-        failed: row.failed,
-        ...row.usage === undefined ? {} : { usage: row.usage },
+      const modes = modeStatusRows(deps).map(mode => ({
+        mode: mode.mode,
+        running: mode.running,
+        concurrency: mode.concurrency,
+        roles: mode.roles.map(row => ({
+          role: row.role,
+          model: row.model,
+          effort: row.effort,
+          dispatched: row.dispatched,
+          running: row.running,
+          failed: row.failed,
+          ...row.usage === undefined ? {} : { usage: row.usage },
+        })),
       }))
-      return Promise.resolve({
-        kind: 'status' as const,
-        running: deps.runningDispatches(),
-        concurrency: deps.maxConcurrency(),
-        roles,
-      })
+      return Promise.resolve({ kind: 'status' as const, modes })
     },
   })
 }

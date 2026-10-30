@@ -1,33 +1,34 @@
 /**
- * Role-pinned team delegation: a configuration-declared role table resolves
- * task kinds to per-role child LLM routes. Roles are host-pinned data — the
- * model never names a route. The `team_dispatch` tool and the captain prompt
- * section mount when the configured subagent provider registers, and failed
- * primary children escalate once to their role's fallback route.
+ * Mode-and-role-pinned team delegation: a configuration-declared mode table
+ * resolves task kinds to per-role child LLM routes, and the captain selects one
+ * mode per dispatch. Roles and routes are host-pinned data — the model chooses
+ * only the mode and the task kind. The `team_dispatch` tool and the captain
+ * prompt section mount when the configured subagent provider registers, and
+ * failed primary children escalate once to their role's fallback route.
  *
  * @module @deepseek-ai/dsh-team-orchestrator
  */
 import { Context, Service } from '@deepseek-ai/cordis';
 import type { Config } from './config.ts';
-import { type ResolvedRole } from './roles.ts';
+import { type ResolvedMode } from './roles.ts';
 import { type DispatchRecord } from './dispatch.ts';
-export type { Config, RoleConfig, FallbackConfig } from './config.ts';
-export { resolveRoles, resolveTaskKind, validateRoleRoutes } from './roles.ts';
-export type { ResolvedRole } from './roles.ts';
+export type { Config, ModeConfig, RoleConfig, FallbackConfig } from './config.ts';
+export { flattenRoles, resolveMode, resolveModes, resolveTaskKind, validateRoleRoutes } from './roles.ts';
+export type { ResolvedMode, ResolvedRole, ResolvedTeam } from './roles.ts';
 export { composeDispatchPrompt, captainSectionText, defineTeamDispatchTool } from './dispatch.ts';
 export type { DispatchArgs, DispatchRecord, TeamDispatchDeps, UsageSnapshot } from './dispatch.ts';
-export { defineTeamStatusTool, roleStatusRows } from './status.ts';
-export type { RoleStatus, TeamStatusDeps } from './status.ts';
+export { defineTeamStatusTool, modeStatusRows } from './status.ts';
+export type { ModeStatus, RoleStatus, TeamStatusDeps } from './status.ts';
 export { teamUsageProjectionDefinition } from './usage-projection.ts';
 export type { TeamUsageProjection, TeamUsageState } from './usage-projection.ts';
 declare module '@deepseek-ai/cordis' {
     interface Context {
-        /** Role-pinned team delegation. */
+        /** Mode-and-role-pinned team delegation. */
         teamOrchestrator: TeamOrchestrator;
     }
 }
 /**
- * Owns the resolved role table and the `team_dispatch` delegation tool.
+ * Owns the resolved mode table and the `team_dispatch` delegation tool.
  * Structural and referential validation rejects at mount; live route
  * validation runs against the LLM runtime at init and, when a provider
  * adapter has not registered yet, re-runs on `llm/adapters-updated` — the
@@ -38,8 +39,9 @@ export declare class TeamOrchestrator extends Service {
     static inject: string[];
     static Config: import("@deepseek-ai/schemastery").default<Config>;
     private readonly config;
-    private readonly roles;
-    private activeDispatches;
+    private readonly team;
+    private readonly activeDispatches;
+    private readonly modeDepth;
     private readonly dispatchRecords;
     private readonly settledChildren;
     private readonly childSessions;
@@ -47,8 +49,9 @@ export declare class TeamOrchestrator extends Service {
     constructor(ctx: Context, config: Config);
     protected [Service.init](): Promise<void>;
     /**
-     * Validate every declared role preset against the agent-presets registry,
-     * the earliest resolvable point: an unknown preset id rejects this mount.
+     * Validate every declared role preset across every mode against the
+     * agent-presets registry, the earliest resolvable point: an unknown preset id
+     * rejects this mount.
      */
     private initPresetValidation;
     /**
@@ -67,29 +70,35 @@ export declare class TeamOrchestrator extends Service {
      * @param info - the settled run's end payload.
      */
     private captureUsage;
-    /** Validate declared routes, deferring until every provider adapter registers. */
+    /** Validate declared routes of every mode, deferring until every provider adapter registers. */
     private initRouteValidation;
-    /** Mount `team_dispatch` and the captain section once the provider registers. */
+    /** Mount `team_dispatch`, `team_status`, and the captain section once the provider registers. */
     private initDelegationTool;
     /**
-     * Resolve one task kind to its routed role.
-     * @param kind - task kind requested by a caller.
-     * @returns the routed role.
+     * Resolve one declared mode.
+     * @param mode - mode id requested by a caller.
+     * @returns the resolved mode.
      */
-    roleFor(kind: string): ResolvedRole;
-    /** Declared task kinds, in configuration order. */
+    modeFor(mode: string): ResolvedMode;
+    /** Declared modes, in configuration order. */
+    get modes(): readonly ResolvedMode[];
+    /** The mode a dispatch runs in when it omits `mode`. */
+    get defaultMode(): ResolvedMode;
+    /** Every declared task kind across modes, in mode-then-declaration order. */
     get kinds(): readonly string[];
-    /** Maximum concurrently running dispatched children. */
-    get maxConcurrency(): number;
     /** Whether the captain may request a route outside the declared table. */
     get captainMayOverride(): boolean;
     /**
-     * Take one dispatch concurrency slot.
-     * @throws when the configured cap is already running.
+     * Take one dispatch concurrency slot in one mode.
+     * @param mode - the mode the dispatch runs in.
+     * @throws when that mode's cap is already running.
      */
-    admitDispatch(): void;
-    /** Return one dispatch concurrency slot after the dispatched child settles. */
-    releaseDispatch(): void;
+    admitDispatch(mode: string): void;
+    /**
+     * Return one dispatch concurrency slot to its mode after the dispatched child settles.
+     * @param mode - the mode the dispatch ran in.
+     */
+    releaseDispatch(mode: string): void;
     /**
      * Record one accepted dispatch for status reporting.
      * @param entry - the accepted dispatch's identifying data.
@@ -110,11 +119,21 @@ export declare class TeamOrchestrator extends Service {
      * Recent labels already dispatched for one kind, newest first.
      * @param kind - the task kind to look up.
      * @param excludeChildId - one child id to skip, conventionally the dispatch being answered.
-     * @returns up to three labels of prior dispatches of this kind.
+     * @returns up to three labels of prior dispatches of this kind, across modes.
      */
     recentLabelsFor(kind: string, excludeChildId?: string): readonly string[];
-    /** Dispatches currently running against the concurrency cap. */
-    get runningDispatches(): number;
+    /**
+     * Dispatches currently running in one mode.
+     * @param mode - the mode to report.
+     * @returns that mode's running dispatches against its concurrency cap.
+     */
+    runningDispatches(mode: string): number;
+    /**
+     * One mode's concurrency cap.
+     * @param mode - the mode to report.
+     * @returns the mode's configured cap.
+     */
+    maxConcurrency(mode: string): number;
     /** The dispatch registry snapshot, newest first. */
     get registry(): readonly DispatchRecord[];
 }

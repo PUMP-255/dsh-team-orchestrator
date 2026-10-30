@@ -1,8 +1,9 @@
 /**
- * The model-facing `team_dispatch` tool: kind-routed delegation through the
- * configured role table. The model declares what kind of task it is dispatching
- * and writes the brief; the plugin owns which role and route runs it, and
- * escalates once to the role's fallback route when the primary child fails.
+ * The model-facing `team_dispatch` tool: mode-and-kind-routed delegation through
+ * the configured team. The model selects a mode (where several are declared) and
+ * a task kind, and writes the brief; the plugin owns which roles exist, which
+ * model and reasoning effort each role runs on, and escalates once to the role's
+ * fallback route when the primary child fails.
  *
  * @module @deepseek-ai/dsh-team-orchestrator/dispatch
  */
@@ -13,7 +14,7 @@ import type { ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import type { AgentOptions } from '@deepseek-ai/dsh-agent'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { SubagentActivationSpec, SubagentActivation, SubagentProvider, SubagentResult } from '@deepseek-ai/dsh-subagent'
-import type { ResolvedRole, RouteValidatingLlm } from './roles.ts'
+import type { ResolvedMode, ResolvedRole, ResolvedTeam, RouteValidatingLlm } from './roles.ts'
 
 /** The subagent-runtime surface dispatch needs; narrowed for direct unit testing. */
 export interface DispatchSubagents {
@@ -27,28 +28,30 @@ export interface TeamDispatchDeps {
   readonly provider: SubagentProvider
   /** The live subagent runtime that starts children. */
   readonly subagents: DispatchSubagents
-  /** Resolved delegation-depth cap for dispatched children; absent leaves the budget to the provider. */
-  readonly maxDepth?: number
-  /** The resolved role table's model-facing surface. */
+  /** Resolve one mode's delegation-depth cap; absent leaves the budget to the provider. */
+  depthFor(mode: string): number | undefined
+  /** The resolved mode table's model-facing surface. */
   readonly team: {
-    /** Declared task kinds, in configuration order. */
+    /** Declared modes, in configuration order. */
+    readonly modes: readonly ResolvedMode[]
+    /** The mode a dispatch runs in when it omits `mode`. */
+    readonly defaultMode: ResolvedMode
+    /** Every declared task kind across modes, in declaration order (the `kind` enum). */
     readonly kinds: readonly string[]
-    /** Resolve one kind to its routed role; rejects unknown kinds. */
-    roleFor(kind: string): ResolvedRole
-    /** The routed roles of all declared kinds, in configuration order. */
-    roleForKinds(): readonly ResolvedRole[]
-    /** Take one concurrency slot; rejects when the cap is reached. */
-    admitDispatch(): void
-    /** Return one concurrency slot when the dispatched child settles. */
-    releaseDispatch(): void
+    /** Resolve one mode id; rejects an undeclared mode. */
+    modeFor(mode: string): ResolvedMode
+    /** Recent labels already dispatched for one kind, newest first. */
+    recentLabelsFor(kind: string, excludeChildId?: string): readonly string[]
+    /** Take one concurrency slot in one mode; rejects when that mode's cap is reached. */
+    admitDispatch(mode: string): void
+    /** Return one concurrency slot to one mode when the dispatched child settles. */
+    releaseDispatch(mode: string): void
     /** Record one accepted dispatch for status reporting. */
     recordDispatch(entry: DispatchRecord): void
     /** Mark one recorded dispatch settled when its child run settles. */
     markSettled(childId: string): void
     /** Record the terminal outcome of one dispatch's child. */
     markOutcome(childId: string, outcome: string): void
-    /** Recent labels already dispatched for one kind, newest first. */
-    recentLabelsFor(kind: string, excludeChildId?: string): readonly string[]
   }
   /** Live LLM runtime for the dispatch-time route preflight. */
   readonly llm: RouteValidatingLlm
@@ -60,9 +63,11 @@ export interface TeamDispatchDeps {
 export interface DispatchRecord {
   /** The child agent's session id. */
   readonly childId: string
+  /** The mode the dispatch ran in. */
+  readonly mode: string
   /** The dispatched task kind. */
   readonly kind: string
-  /** The routed role id. */
+  /** The routed role id within that mode. */
   readonly role: string
   /** The pinned model id this attempt ran on. */
   readonly model: string
@@ -90,6 +95,7 @@ export interface UsageSnapshot {
 
 /** Validated `team_dispatch` arguments. */
 export interface DispatchArgs {
+  readonly mode?: string
   readonly kind: string
   readonly description: string
   readonly prompt: string
@@ -112,6 +118,9 @@ export function assertDispatchArgs(value: unknown): asserts value is DispatchArg
     if (typeof current !== 'string' || current.length === 0) {
       throw new Error(`team_dispatch \`${field}\` must be a non-empty string`)
     }
+  }
+  if (args.mode !== undefined && (typeof args.mode !== 'string' || args.mode.length === 0)) {
+    throw new Error('team_dispatch `mode` must be a non-empty string')
   }
   if (args.cwd !== undefined && typeof args.cwd !== 'string') {
     throw new Error('team_dispatch `cwd` must be a string')
@@ -136,6 +145,8 @@ export function composeDispatchPrompt(role: ResolvedRole, prompt: string): strin
 
 /** The per-attempt inputs shared by the primary dispatch and its fallback. */
 interface AttemptContext {
+  /** The mode the dispatch runs in. */
+  readonly mode: string
   /** The dispatched task kind. */
   readonly kind: string
   /** The composed child prompt (role brief plus the brief). */
@@ -152,6 +163,8 @@ interface AttemptContext {
   readonly signal: AbortSignal
   /** The role's agent preset, when declared. */
   readonly preset?: string | undefined
+  /** The mode's resolved depth cap; absent leaves the budget to the provider. */
+  readonly maxDepth?: number | undefined
 }
 
 /**
@@ -164,22 +177,36 @@ export function defineTeamDispatchTool(deps: TeamDispatchDeps): ToolDefinition {
   if (!deps.provider.capabilities.agentOptions) {
     throw new Error(`team-orchestrator: provider "${deps.provider.name}" does not support child agentOptions`)
   }
-  const presetNeedingRoles = deps.team.roleForKinds().filter(role => role.preset !== undefined)
+  const presetNeedingRoles = deps.team.modes.flatMap(mode => [...mode.roles.values()]
+    .filter(role => role.preset !== undefined)
+    .map(role => deps.team.modes.length === 1 ? `"${role.id}"` : `"${mode.id}/${role.id}"`))
   if (presetNeedingRoles.length > 0 && !deps.provider.capabilities.agentPreset) {
     throw new Error(`team-orchestrator: provider "${deps.provider.name}" does not support child agent presets`
-      + ` (roles with presets: ${presetNeedingRoles.map(role => `"${role.id}"`).join(', ')})`)
+      + ` (roles with presets: ${presetNeedingRoles.join(', ')})`)
   }
+  const severalModes = deps.team.modes.length > 1
   return defineTool({
     name: 'team_dispatch',
-    description: 'Dispatch one team task to the role configured for its task kind. The role\'s model and reasoning effort are host-pinned; you choose only the kind and write the complete brief.'
+    description: (severalModes
+      ? 'Dispatch one team task to the role its kind routes to in the mode you choose. Every mode\'s roles, models, and reasoning efforts are host-pinned; you choose the mode, the kind, and write the complete brief.'
+      : 'Dispatch one team task to the role configured for its task kind. The role\'s model and reasoning effort are host-pinned; you choose only the kind and write the complete brief.')
       + ' This tool starts an independently managed subagent and immediately returns its id; the runtime notifies you when it finishes.'
       + ' Before re-dispatching the same kind, check the returned `recent` labels and state what differs from those attempts.',
     parameters: {
+      ...severalModes ? {
+        mode: {
+          type: 'string' as const,
+          enum: deps.team.modes.map(mode => mode.id),
+          description: `Mode to run this task in. Each mode declares its own roles, routes, and flow budget; omission runs the default, "${deps.team.defaultMode.id}".`,
+        },
+      } : {},
       kind: {
         type: 'string',
         required: true,
         enum: [...deps.team.kinds],
-        description: 'Task kind; routes to its configured role and model route.',
+        description: severalModes
+          ? 'Task kind; routes to the role the chosen mode declares for it. A kind is only routable in a mode that declares it.'
+          : 'Task kind; routes to the role configured for it.',
       },
       description: {
         type: 'string',
@@ -210,6 +237,7 @@ export function defineTeamDispatchTool(deps: TeamDispatchDeps): ToolDefinition {
         properties: {
           kind: { type: 'string', required: true, const: 'dispatch' },
           subagentId: { type: 'string', required: true },
+          mode: { type: 'string', required: true },
           role: { type: 'string', required: true },
           model: { type: 'string', required: true },
           escalates: { type: 'boolean', required: true },
@@ -218,7 +246,7 @@ export function defineTeamDispatchTool(deps: TeamDispatchDeps): ToolDefinition {
       },
       render: (_args, value) => [{
         type: 'text',
-        text: `dispatched to role "${value.role}" (${value.model}); started subagent ${value.subagentId}`
+        text: `dispatched ${severalModes ? `in mode "${value.mode}" to ` : 'to '}role "${value.role}" (${value.model}); started subagent ${value.subagentId}`
           + (value.escalates
             ? '; if this run ends without completing, it automatically re-dispatches once on this role\'s stronger fallback route'
             : ''),
@@ -231,18 +259,21 @@ export function defineTeamDispatchTool(deps: TeamDispatchDeps): ToolDefinition {
       if (parent === undefined) {
         throw new Error('team_dispatch requires a calling agent (exec.agent was undefined)')
       }
-      const role = deps.team.roleFor(args.kind)
+      const mode = args.mode === undefined ? deps.team.defaultMode : deps.team.modeFor(args.mode)
+      const role = mode.roleFor(args.kind)
       if (args.output_schema !== undefined && !deps.provider.capabilities.outputSchema) {
         throw new Error(`team-orchestrator: provider "${deps.provider.name}" does not support structured child output`)
       }
       const composed = composeDispatchPrompt(role, args.prompt)
-      deps.team.admitDispatch()
+      deps.team.admitDispatch(mode.id)
       try {
         await deps.llm.resolveCallConfig({ ...role.route }, exec.signal)
         if (role.fallback !== undefined) {
           await deps.llm.resolveCallConfig({ ...role.fallback.route }, exec.signal)
         }
+        const depth = deps.depthFor(mode.id)
         const context: AttemptContext = {
+          mode: mode.id,
           kind: args.kind,
           composed,
           label: args.description,
@@ -251,10 +282,12 @@ export function defineTeamDispatchTool(deps: TeamDispatchDeps): ToolDefinition {
           parent,
           signal: exec.signal,
           ...role.preset === undefined ? {} : { preset: role.preset },
+          ...depth === undefined ? {} : { maxDepth: depth },
         }
         const started = await startAttempt(deps, context, role.options)
         deps.team.recordDispatch({
           childId: started.childId,
+          mode: mode.id,
           kind: args.kind,
           role: role.id,
           model: role.route.model,
@@ -265,13 +298,14 @@ export function defineTeamDispatchTool(deps: TeamDispatchDeps): ToolDefinition {
         return {
           kind: 'dispatch' as const,
           subagentId: started.childId,
+          mode: mode.id,
           role: role.id,
           model: role.route.model,
           escalates: role.fallback !== undefined,
           recent: [...deps.team.recentLabelsFor(args.kind, started.childId)],
         }
       } catch (error) {
-        deps.team.releaseDispatch()
+        deps.team.releaseDispatch(mode.id)
         throw error
       }
     },
@@ -289,7 +323,7 @@ function startAttempt(deps: TeamDispatchDeps, context: AttemptContext, routeOpti
       parent: context.parent,
       agentOptions: { ...routeOptions },
       ...context.preset === undefined ? {} : { agentPreset: context.preset },
-      ...deps.maxDepth === undefined ? {} : { maxDepth: deps.maxDepth },
+      ...context.maxDepth === undefined ? {} : { maxDepth: context.maxDepth },
       ...context.outputSchema === undefined ? {} : { outputSchema: context.outputSchema },
     },
     signal: context.signal,
@@ -323,7 +357,7 @@ function settleAttempt(
   result: SubagentResult | undefined,
   context: AttemptContext,
 ): void {
-  deps.team.releaseDispatch()
+  deps.team.releaseDispatch(context.mode)
   deps.team.markSettled(childId)
   const outcome = result?.stopReason ?? 'error'
   deps.team.markOutcome(childId, outcome)
@@ -344,15 +378,17 @@ async function escalate(
   const composed = `${context.composed}\n\nA previous attempt with a faster model ended without completing (stop reason: ${failedOutcome}).`
     + ' You are the escalation running a stronger model: deliver the task fully.'
   try {
-    deps.team.admitDispatch()
+    deps.team.admitDispatch(context.mode)
   } catch (error) {
-    deps.onWarn?.(`team-orchestrator: fallback for role "${role.id}" skipped, no free concurrency slot: ${String(error)}`)
+    deps.onWarn?.(`team-orchestrator: fallback for role "${role.id}" in mode "${context.mode}" skipped,`
+      + ` no free concurrency slot: ${String(error)}`)
     return
   }
   try {
     const started = await startAttempt(deps, { ...context, label, composed }, fallback.options)
     deps.team.recordDispatch({
       childId: started.childId,
+      mode: context.mode,
       kind: context.kind,
       role: role.id,
       model: fallback.route.model,
@@ -361,26 +397,47 @@ async function escalate(
     })
     observeAttempt(deps, started, role, 2, { ...context, label, composed })
   } catch (error) {
-    deps.team.releaseDispatch()
-    deps.onWarn?.(`team-orchestrator: fallback for role "${role.id}" failed to start: ${String(error)}`)
+    deps.team.releaseDispatch(context.mode)
+    deps.onWarn?.(`team-orchestrator: fallback for role "${role.id}" in mode "${context.mode}" failed to start: ${String(error)}`)
   }
 }
 
+/** One role's mention in the captain section: its id, model, and reasoning effort. */
+function roleRouteText(role: ResolvedRole, verbose: boolean): string {
+  const effort = role.route.reasoningEffort
+  return verbose
+    ? `role \`${role.id}\` (\`${role.route.model}\` at \`${effort}\` reasoning effort)`
+    : `\`${role.id}\` (\`${role.route.model}\` at \`${effort}\`)`
+}
+
+/** The captain section's per-mode body: this mode's kinds, routes, and discipline. */
+function modeBody(mode: ResolvedMode, verbose: boolean): string {
+  const routes = mode.kinds.map(kind => {
+    const role = mode.roleFor(kind)
+    return verbose
+      ? `- \`${kind}\` → ${roleRouteText(role, true)}`
+      : `\`${kind}\` → ${roleRouteText(role, false)}`
+  })
+  const body = verbose ? routes.join('\n') : routes.join(', ')
+  return mode.brief === undefined ? body : `${body}\n  ${mode.brief}`
+}
+
 /**
- * The captain prompt section text: the kind→role routing table and briefing
- * discipline, rendered only where the tool is visible.
- * @param kinds - declared task kinds in configuration order.
- * @param roleFor - kind-to-role resolver.
+ * The captain prompt section text: the mode table, its kind→role routes, and the
+ * briefing discipline, rendered only where the tool is visible.
+ * @param team - the resolved deployment.
  * @returns the section text.
  */
-export function captainSectionText(kinds: readonly string[], roleFor: (kind: string) => ResolvedRole): string {
-  const routes = kinds.map((kind) => {
-    const role = roleFor(kind)
-    const effort = role.route.reasoningEffort
-    return `- \`${kind}\` → role \`${role.id}\` (\`${role.route.model}\` at \`${effort}\` reasoning effort)`
-  })
-  return 'Delegate team tasks with `team_dispatch` by task kind; each kind runs on its configured role and model route:\n'
-    + `${routes.join('\n')}\n\n`
+export function captainSectionText(team: ResolvedTeam): string {
+  const modes = [...team.modes.values()]
+  const single = modes.length === 1 ? modes[0] : undefined
+  const table = single === undefined
+    ? 'Delegate team tasks with `team_dispatch`: choose the `mode` whose roles, routes, and flow fit the task, then its task kind; omit `mode` to run the default.'
+      + ' Prefer the cheapest mode that can deliver; choose a stricter mode when the work needs review, verification, or stronger reasoning.\n\n'
+      + modes.map(mode => `- \`${mode.id}\`${mode.id === team.defaultMode.id ? ' (default)' : ''}: ${modeBody(mode, false)}`).join('\n')
+    : 'Delegate team tasks with `team_dispatch` by task kind; each kind runs on its configured role and model route:\n'
+      + modeBody(single, true)
+  return `${table}\n\n`
     + 'Write every brief short and concrete — exact file paths, full expected behavior, and acceptance criteria; the child does not see this conversation. Consult a high-effort planning role before dispatching open-ended work to a fast implementation role. Dispatch independent kinds together in one message; when only waiting for results remains, end your turn instead of polling. Check `team_status` before dispatching more work when completions seem overdue. Do not re-dispatch the same kind for the same goal: the dispatch result lists that kind\'s recent labels, and a retry must state what differs from those attempts.\n\n'
     + 'You are the implementer of last resort: dispatch the matching kind first and implement directly only after that dispatch failed. Role routes carry a fallback escalation automatically; failed dispatches re-run on a stronger model without your involvement.'
 }

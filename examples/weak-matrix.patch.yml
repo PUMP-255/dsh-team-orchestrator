@@ -7,6 +7,10 @@
 # 派发的子代理未完成结算(error / max-tokens / refusal)时,
 # 插件自动用 fallback 路由重派一次,无需队长介入。
 #
+# 只声明一个模式时不写 defaultMode —— 唯一的模式就是默认模式,
+# 队长不需要选择,team_dispatch 也不会暴露 mode 参数。
+# 多模式(快/均衡/严格)的写法见 modes.patch.yml。
+#
 # 用法:pnpm dsh --profile <profile> --patch weak-matrix.patch.yml "<任务>"
 
 - insert:
@@ -14,37 +18,39 @@
       name: '@deepseek-ai/dsh-team-orchestrator'
       config:
         provider: spawn
-        roles:
-          planner:
-            provider: deepseek-official
-            model: deepseek-flash
-            reasoningEffort: low
-            brief: You are the planning role. Produce a complete, directly implementable brief.
-            fallback:
-              provider: deepseek-official
-              model: deepseek-v4-pro
-              reasoningEffort: high
-          coder:
-            provider: deepseek-official
-            model: deepseek-flash
-            reasoningEffort: low
-            brief: You are the implementation role. Follow the brief exactly; make no design decisions.
-            maxTokens: 65536
-            fallback:
-              provider: deepseek-official
-              model: deepseek-v4-pro
-              reasoningEffort: high
-          reviewer:
-            provider: deepseek-official
-            model: deepseek-flash
-            reasoningEffort: low
-            brief: You are the review role. Review correctness, edge cases, and style; report findings only.
-            fallback:
-              provider: deepseek-official
-              model: deepseek-v4-pro
-              reasoningEffort: high
-        taskRouting:
-          plan: planner
-          implement: coder
-          review: reviewer
-        concurrency: 3
+        modes:
+          fast:
+            concurrency: 3
+            roles:
+              planner:
+                provider: deepseek-official
+                model: deepseek-flash
+                reasoningEffort: low
+                brief: You are the planning role. Produce a complete, directly implementable brief.
+                fallback:
+                  provider: deepseek-official
+                  model: deepseek-v4-pro
+                  reasoningEffort: high
+              coder:
+                provider: deepseek-official
+                model: deepseek-flash
+                reasoningEffort: low
+                brief: You are the implementation role. Follow the brief exactly; make no design decisions.
+                maxTokens: 65536
+                fallback:
+                  provider: deepseek-official
+                  model: deepseek-v4-pro
+                  reasoningEffort: high
+              reviewer:
+                provider: deepseek-official
+                model: deepseek-flash
+                reasoningEffort: low
+                brief: You are the review role. Review correctness, edge cases, and style; report findings only.
+                fallback:
+                  provider: deepseek-official
+                  model: deepseek-v4-pro
+                  reasoningEffort: high
+            taskRouting:
+              plan: planner
+              implement: coder
+              review: reviewer
