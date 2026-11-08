@@ -115,7 +115,7 @@ config:
 
 ### 模型可见工具
 
-`team_dispatch` 在所选模式内为一个任务类型启动一个子代理:模型传入 `mode`(仅在声明多个模式时)、`kind`、展示用的 `description`、完整简报,以及(provider 支持时)可选的 `output_schema` 约束子代理最终答复。工具把模式与类型解析到对应角色,经 LLM 运行时再次校验固定路由(及声明时的兜底路由),把角色的 `brief` 前置到子代理提示词,并用配置的 subagent 提供方以角色固定的 `AgentOptions`、preset 和该模式的深度上限启动子代理。返回值标明模式、角色、该角色失败时是否升级,并列出该类型近期的派发 label,重试时据以说明差异。描述与同类型近期 label 重复——大小写/标点归一化后相等,或字符 bigram Jaccard 相似度 ≥0.8(该比较同样覆盖中文 label)——时返回 `duplicateOf`,render 指出先前派发并重申重试纪律;检测是建议性的,从不拦截派发。`team_status` 按模式报告派发登记表:对照该模式 `concurrency` 的运行中数量、按角色的已派发/运行中/失败计数,以及已结算派发的 provider 上报 token 用量合计(取自本包自己的 `teamOrchestratorUsage` 会话投影;会话不再可读的子代理结算时不带用量快照),并在尚无任何派发时附加"实现者是最后手段"纪律。队长提示词区在工具可见的 scope 渲染模式表、其类型→角色路由与简报纪律。
+`team_dispatch` 在所选模式内为一个任务类型启动一个子代理:模型传入 `mode`(仅在声明多个模式时)、`kind`、展示用的 `description`、完整简报,以及(provider 支持时)可选的 `output_schema` 约束子代理最终答复。工具把模式与类型解析到对应角色,经 LLM 运行时再次校验固定路由(及声明时的兜底路由),把角色的 `brief` 前置到子代理提示词,并用配置的 subagent 提供方以角色固定的 `AgentOptions`、preset 和该模式的深度上限启动子代理。返回值标明模式、角色、该角色失败时是否升级,并列出该类型近期的派发 label,重试时据以说明差异。描述与同类型近期 label 重复——大小写/标点归一化后相等,或字符 bigram Jaccard 相似度 ≥0.8(该比较同样覆盖中文 label)——时返回 `duplicateOf`,render 指出先前派发并重申重试纪律;检测是建议性的,从不拦截派发。`team_status` 按模式报告派发登记表:对照该模式 `concurrency` 的运行中数量、按角色的已派发/运行中/失败计数,以及已结算派发的 provider 上报 token 用量合计(取自本包自己的 `teamOrchestratorUsage` 会话投影;会话不再可读的子代理结算时不带用量快照),并在尚无任何派发时附加"实现者是最后手段"纪律。队长提示词区在工具可见的 scope 渲染模式表、其类型→角色路由与简报纪律。`captainDiscipline` 选择该区深度:`full`(默认)携带证据锚定规则与"实现者是最后手段"纪律;`minimal` 只保留模式表与简报具体性规则——同一构建,唯一差异是区文本,亦即派发协议消融的 A/B 两臂。
 
 <a id="understand-the-implementation"></a>
 ## 理解实现

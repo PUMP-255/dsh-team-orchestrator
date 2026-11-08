@@ -142,7 +142,7 @@ Everything else must stay byte-identical to upstream. Verify with
 
 ## Verification ladder
 
-1. `npm test` — 89 unit tests (ConfigSchema validation of the mount path and
+1. `npm test` — 92 unit tests (ConfigSchema validation of the mount path and
    its defaults, mode resolution and default-mode rules, in-mode routing, role
    inheritance folding with every rejection path, mode and kind gating,
    per-mode concurrency on every admit/release path, fallback escalation
@@ -165,18 +165,21 @@ Everything else must stay byte-identical to upstream. Verify with
 
 ## Current state (2026-10-30; 2026-11-09 updates below)
 
-- **2026-11-09, second round: dispatch algorithms.** `npm test` 89/89, build
+- **2026-11-09, second round: dispatch algorithms.** `npm test` 92/92, build
   0 errors, `lib/` rebuilt. (1) Duplicate-dispatch detection: a description
   equal to a recent same-kind label after case/punctuation normalization, or
   at ≥0.8 character-bigram Jaccard (CJK-safe), is returned as `duplicateOf`
   and the render names the earlier dispatch — advisory, never blocking
   (targets the observed plan×2 smoke defect). (2) A `max-tokens` escalation
   brief adds the concision instruction (campaign runaway-reasoning failure).
-  Deferred with reasons: a mount-time "fallback must not be weaker than its
-  primary" dominance guard — the llm runtime declares effort order
-  (`LlmModelReasoningInfo.efforts`) but published releases expose no accessor,
-  and cross-model strength has no data at all (upstream ask); a fallback
-  concurrency-slot reservation — contract change to the per-mode cap, defer.
+  (3) `captainDiscipline: 'full' | 'minimal'` (default full) gates the captain
+  section's depth — the pair is grid-v2 config 10's dispatch-protocol ablation
+  A/B arms under one build. Deferred with reasons: a mount-time "fallback must
+  not be weaker than its primary" dominance guard — the llm runtime declares
+  effort order (`LlmModelReasoningInfo.efforts`) but published releases expose
+  no accessor, and cross-model strength has no data at all (upstream ask); a
+  fallback concurrency-slot reservation — contract change to the per-mode cap,
+  defer.
 - **2026-11-09: role inheritance, delegation nudges, evidence-grounded briefs.**
   `npm test` 81/81, `npm run build` 0 errors; `lib/` rebuilt with src. Three
   changes: (1) `RoleConfig.extends` per-mode inheritance (deltas above);

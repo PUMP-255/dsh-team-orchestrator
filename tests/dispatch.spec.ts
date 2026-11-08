@@ -693,4 +693,13 @@ describe('captainSectionText', () => {
     expect(text).toContain('`review` → role `challenger` (`m-max` at `high` reasoning effort)')
     expect(text).toContain('  Every implementation is followed by a review dispatch.')
   })
+
+  it('keeps the mode table and brief concreteness but drops the campaign discipline under minimal', () => {
+    const text = captainSectionText(resolveModes(config()), 'minimal')
+    expect(text).toContain('choose the `mode` whose roles, routes, and flow fit the task')
+    expect(text).toContain('Write every brief short and concrete')
+    expect(text).not.toContain('Ground the brief')
+    expect(text).not.toContain('implementer of last resort')
+    expect(text).not.toContain('team_status')
+  })
 })

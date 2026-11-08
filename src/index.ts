@@ -214,7 +214,7 @@ export class TeamOrchestrator extends Service {
         order: this.ctx.systemPrompt.getSectionOrder('TOOL_SUBAGENT'),
         text: (context) => {
           if (this.ctx.tools.get(definition.name, context.scope) !== definition) return ''
-          return captainSectionText(this.team)
+          return captainSectionText(this.team, this.config.captainDiscipline ?? 'full')
         },
       })
       mounted = true

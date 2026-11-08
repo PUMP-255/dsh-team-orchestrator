@@ -157,6 +157,18 @@ describe('ConfigSchema', () => {
     expect(() => resolveModes(config)).toThrow('is incomplete after inheritance')
   })
 
+  it('defaults captainDiscipline to full and accepts the minimal arm', async () => {
+    const defaulted = await accepted(shippedShape())
+    expect(defaulted.captainDiscipline).toBe('full')
+    const minimal = await accepted({ ...shippedShape(), captainDiscipline: 'minimal' })
+    expect(minimal.captainDiscipline).toBe('minimal')
+  })
+
+  it('rejects an unknown captainDiscipline value', async () => {
+    const message = await rejected({ ...shippedShape(), captainDiscipline: 'aggressive' })
+    expect(message).toContain('captainDiscipline')
+  })
+
   it('rejects a configuration with no modes table', async () => {
     expect(await rejected({ provider: 'spawn' })).toContain('modes')
   })

@@ -87,6 +87,15 @@ export interface Config {
   readonly modes: Readonly<Record<string, ModeConfig>>
   /** Reserved: whether the captain may request a route outside the declared table. */
   readonly allowCaptainOverride: boolean
+  /**
+   * Captain-section discipline depth. `full` (default) carries the mode table,
+   * the briefing rules, the evidence-grounding rule, and the
+   * implementer-of-last-resort discipline; `minimal` keeps the mode table and
+   * the brief-concreteness rule only. The pair is also the dispatch-protocol
+   * ablation's A/B arms (grid v2 config 10): one build, the section text is the
+   * only difference.
+   */
+  readonly captainDiscipline?: 'full' | 'minimal'
 }
 
 /** Schemastery schema for one role's stronger escalation route. */
@@ -128,4 +137,5 @@ export const ConfigSchema: z<Config> = z.object({
   defaultMode: z.string().min(1),
   modes: z.dict(ModeSchema).required(),
   allowCaptainOverride: z.boolean().default(false),
+  captainDiscipline: z.union([z.const('full' as const), z.const('minimal' as const)]).default('full'),
 })

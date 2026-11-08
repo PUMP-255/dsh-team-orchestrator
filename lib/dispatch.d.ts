@@ -125,10 +125,14 @@ export declare function findDuplicateLabel(label: string, recentLabels: readonly
  */
 export declare function defineTeamDispatchTool(deps: TeamDispatchDeps): ToolDefinition;
 /**
- * The captain prompt section text: the mode table, its kind→role routes, and the
- * briefing discipline, rendered only where the tool is visible.
+ * The captain prompt section text: the mode table, its kind→role routes, and
+ * the briefing discipline, rendered only where the tool is visible.
  * @param team - the resolved deployment.
+ * @param discipline - `'full'` (default) carries the evidence-grounding rule
+ * and the implementer-of-last-resort discipline; `'minimal'` keeps the mode
+ * table and the brief-concreteness rule only — the dispatch-protocol
+ * ablation's lightweight arm.
  * @returns the section text.
  */
-export declare function captainSectionText(team: ResolvedTeam): string;
+export declare function captainSectionText(team: ResolvedTeam, discipline?: 'full' | 'minimal'): string;
 //# sourceMappingURL=dispatch.d.ts.map
