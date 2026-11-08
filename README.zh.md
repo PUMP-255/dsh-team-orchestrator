@@ -95,7 +95,7 @@
 
 ### 兜底升级
 
-每个角色可以声明一条更强的 `fallback` 路由(`provider`/`model`/`reasoningEffort`)。当该角色的主路子代理未完成结算——`error`、`max-tokens`、`refusal` 或任何非 `completed` 且非 `aborted` 的终止原因——插件自动在同一模式下用兜底路由重派同一任务一次,简报后附上失败尝试的终止原因。取消不触发升级,兜底尝试不再二次升级,两条路由都在派发时预检,无效兜底随派发当场失败而非中途暴露。`maxTokens` 限制每次子代理请求的输出预算,防 runaway 推理;`max-tokens` 结算是正常的兜底触发条件。`examples/weak-matrix.patch.yml` 是这套机制针对的场景:弱模型矩阵 + 强模型兜底。
+每个角色可以声明一条更强的 `fallback` 路由(`provider`/`model`/`reasoningEffort`)。当该角色的主路子代理未完成结算——`error`、`max-tokens`、`refusal` 或任何非 `completed` 且非 `aborted` 的终止原因——插件自动在同一模式下用兜底路由重派同一任务一次,简报后附上失败尝试的终止原因。`max-tokens` 结算还会额外指示升级方简洁交付、不重复推导失败尝试已完成的工作——这是 SWE-bench 试点战役实测到的 runaway 推理失败模式。取消不触发升级,兜底尝试不再二次升级,两条路由都在派发时预检,无效兜底随派发当场失败而非中途暴露。`maxTokens` 限制每次子代理请求的输出预算,防 runaway 推理;`max-tokens` 结算是正常的兜底触发条件。`examples/weak-matrix.patch.yml` 是这套机制针对的场景:弱模型矩阵 + 强模型兜底。
 
 ### 从 0.1 升级
 
@@ -115,7 +115,7 @@ config:
 
 ### 模型可见工具
 
-`team_dispatch` 在所选模式内为一个任务类型启动一个子代理:模型传入 `mode`(仅在声明多个模式时)、`kind`、展示用的 `description`、完整简报,以及(provider 支持时)可选的 `output_schema` 约束子代理最终答复。工具把模式与类型解析到对应角色,经 LLM 运行时再次校验固定路由(及声明时的兜底路由),把角色的 `brief` 前置到子代理提示词,并用配置的 subagent 提供方以角色固定的 `AgentOptions`、preset 和该模式的深度上限启动子代理。返回值标明模式、角色、该角色失败时是否升级,并列出该类型近期的派发 label,重试时据以说明差异。`team_status` 按模式报告派发登记表:对照该模式 `concurrency` 的运行中数量、按角色的已派发/运行中/失败计数,以及已结算派发的 provider 上报 token 用量合计(取自本包自己的 `teamOrchestratorUsage` 会话投影;会话不再可读的子代理结算时不带用量快照)。队长提示词区在工具可见的 scope 渲染模式表、其类型→角色路由与简报纪律。
+`team_dispatch` 在所选模式内为一个任务类型启动一个子代理:模型传入 `mode`(仅在声明多个模式时)、`kind`、展示用的 `description`、完整简报,以及(provider 支持时)可选的 `output_schema` 约束子代理最终答复。工具把模式与类型解析到对应角色,经 LLM 运行时再次校验固定路由(及声明时的兜底路由),把角色的 `brief` 前置到子代理提示词,并用配置的 subagent 提供方以角色固定的 `AgentOptions`、preset 和该模式的深度上限启动子代理。返回值标明模式、角色、该角色失败时是否升级,并列出该类型近期的派发 label,重试时据以说明差异。描述与同类型近期 label 重复——大小写/标点归一化后相等,或字符 bigram Jaccard 相似度 ≥0.8(该比较同样覆盖中文 label)——时返回 `duplicateOf`,render 指出先前派发并重申重试纪律;检测是建议性的,从不拦截派发。`team_status` 按模式报告派发登记表:对照该模式 `concurrency` 的运行中数量、按角色的已派发/运行中/失败计数,以及已结算派发的 provider 上报 token 用量合计(取自本包自己的 `teamOrchestratorUsage` 会话投影;会话不再可读的子代理结算时不带用量快照),并在尚无任何派发时附加"实现者是最后手段"纪律。队长提示词区在工具可见的 scope 渲染模式表、其类型→角色路由与简报纪律。
 
 <a id="understand-the-implementation"></a>
 ## 理解实现

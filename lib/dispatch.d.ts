@@ -107,6 +107,17 @@ export declare function assertDispatchArgs(value: unknown): asserts value is Dis
  */
 export declare function composeDispatchPrompt(role: ResolvedRole, prompt: string): string;
 /**
+ * Find the recent label this description duplicates: an exact match after
+ * normalization, or character-bigram Jaccard similarity of at least
+ * {@link DUPLICATE_JACCARD}. Surfacing a repeat is advisory — the result render
+ * names the earlier attempt, and the captain decides; the smoke runs observed
+ * the same plan dispatched twice under near-identical labels.
+ * @param label - the incoming dispatch description.
+ * @param recentLabels - the kind's recent labels, newest first.
+ * @returns the duplicated recent label, or undefined when the description is new.
+ */
+export declare function findDuplicateLabel(label: string, recentLabels: readonly string[]): string | undefined;
+/**
  * Build the `team_dispatch` tool definition. The executor validates the schema,
  * so `execute` re-validates only as defense at the tool JSON boundary.
  * @param deps - dispatch dependencies.

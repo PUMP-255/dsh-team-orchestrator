@@ -10,6 +10,7 @@ import {
   captainSectionText,
   composeDispatchPrompt,
   defineTeamDispatchTool,
+  findDuplicateLabel,
 } from '../src/dispatch.ts'
 import type { DispatchRecord, TeamDispatchDeps } from '../src/dispatch.ts'
 
@@ -248,6 +249,31 @@ describe('composeDispatchPrompt', () => {
   })
 })
 
+describe('findDuplicateLabel', () => {
+  it('matches after case, whitespace, and punctuation normalization', () => {
+    expect(findDuplicateLabel('Plan slugify!', ['Write outline', 'plan   slugify.'])).toBe('plan   slugify.')
+  })
+
+  it('matches near-identical labels at or above the Jaccard threshold', () => {
+    expect(findDuplicateLabel('Plan slugify utility briefly', ['Plan slugify briefly utility']))
+      .toBe('Plan slugify briefly utility')
+  })
+
+  it('compares CJK labels by content, ignoring punctuation', () => {
+    expect(findDuplicateLabel('写一行到 WM2。', ['写一行到wm2'])).toBe('写一行到wm2')
+  })
+
+  it('returns undefined below the threshold', () => {
+    expect(findDuplicateLabel('Plan slugify', ['Write slugify tests', 'Review the plan']))
+      .toBeUndefined()
+  })
+
+  it('returns undefined for an empty or content-free label', () => {
+    expect(findDuplicateLabel('', ['anything'])).toBeUndefined()
+    expect(findDuplicateLabel('!!!', ['anything'])).toBeUndefined()
+  })
+})
+
 describe('team_dispatch dispatch', () => {
   it('routes through the default mode, carries its pinned route, and composes the brief', async () => {
     const h = harness()
@@ -367,6 +393,20 @@ describe('team_dispatch dispatch', () => {
     expect(result).toMatchObject({ recent: ['First plan'] })
     const other = await h.dispatch({ kind: 'implement', description: 'Do it', prompt: 'p' }, new AbortController().signal)
     expect(other).toMatchObject({ recent: [] })
+  })
+
+  it('marks a dispatch whose description duplicates a recent same-kind label', async () => {
+    const h = harness()
+    const first = await h.dispatch({ kind: 'plan', description: 'Plan slugify', prompt: 'p' }, new AbortController().signal)
+    expect(first).not.toHaveProperty('duplicateOf')
+    h.settleChild(1, 'completed')
+    await drained()
+    const second = await h.dispatch({ kind: 'plan', description: 'plan slugify!', prompt: 'p' }, new AbortController().signal)
+    expect(second).toMatchObject({ duplicateOf: 'Plan slugify' })
+    h.settleChild(2, 'completed')
+    await drained()
+    const distinct = await h.dispatch({ kind: 'plan', description: 'Review the plan output', prompt: 'p' }, new AbortController().signal)
+    expect(distinct).not.toHaveProperty('duplicateOf')
   })
 
   it('passes a validated output schema through to the child request', async () => {
@@ -491,6 +531,7 @@ describe('fallback escalation', () => {
     expect(fallback.request.agentOptions).toEqual({ provider: 'deepseek-official', model: 'm-strongest', reasoningEffort: 'max' })
     const text = (fallback.request.prompt[0] as { text: string }).text
     expect(text).toContain('stop reason: max-tokens')
+    expect(text).toContain('hit its output budget')
     expect(text).toContain('escalation running a stronger model')
     expect(h.records[0]).toMatchObject({ childId: 'child-2', mode: 'fast', route: 'fallback', label: 'Design it (fallback)', kind: 'plan' })
     expect(h.records[1]).toMatchObject({ childId: 'child-1', mode: 'fast', route: 'primary', outcome: 'max-tokens' })
@@ -541,6 +582,9 @@ describe('fallback escalation', () => {
     expect(h.started[1]?.request.agentOptions).toEqual({
       provider: 'deepseek-official', model: 'm-max', reasoningEffort: 'max',
     })
+    const fallbackText = (h.started[1]?.request.prompt[0] as { text: string }).text
+    expect(fallbackText).toContain('stop reason: error')
+    expect(fallbackText).not.toContain('hit its output budget')
     expect(h.records[0]).toMatchObject({ childId: 'child-2', mode: 'strict', route: 'fallback' })
     expect(h.running('strict')).toBe(1)
     expect(h.running('fast')).toBe(0)
@@ -579,6 +623,48 @@ describe('start and fallback failure paths', () => {
     expect(h.records).toHaveLength(1)
     expect(h.warnings[0]).toContain('mode "fast" failed to start')
     expect(h.running('fast')).toBe(0)
+  })
+})
+
+describe('team_dispatch render', () => {
+  type PortableRender = (args: unknown, value: unknown) => { type: string; text: string }[]
+
+  function renderText(definition: ReturnType<typeof defineTeamDispatchTool>, value: unknown): string {
+    const render = definition.output.render as unknown as PortableRender
+    return render({}, value)[0]?.text ?? ''
+  }
+
+  it('names the duplicate dispatch and the discipline when duplicateOf is set', () => {
+    const definition = defineTeamDispatchTool({
+      provider: PROVIDER,
+      subagents: { startActivation: async () => { throw new Error('unreachable') } },
+      depthFor: () => undefined,
+      team: inertSurface(resolveModes(config())),
+      llm: { resolveCallConfig: async call => ({ ...call }) },
+    })
+    const text = renderText(definition, {
+      kind: 'dispatch', subagentId: 'child-2', mode: 'fast', role: 'planner',
+      model: 'm-strong', escalates: true, recent: ['Plan slugify'], duplicateOf: 'Plan slugify',
+    })
+    expect(text).toContain('re-dispatches once on this role\'s stronger fallback route')
+    expect(text).toContain('duplicates the recent dispatch "Plan slugify"')
+    expect(text).toContain('state what differs, otherwise stop')
+  })
+
+  it('stays silent about duplicates when duplicateOf is absent', () => {
+    const definition = defineTeamDispatchTool({
+      provider: PROVIDER,
+      subagents: { startActivation: async () => { throw new Error('unreachable') } },
+      depthFor: () => undefined,
+      team: inertSurface(resolveModes(config())),
+      llm: { resolveCallConfig: async call => ({ ...call }) },
+    })
+    const text = renderText(definition, {
+      kind: 'dispatch', subagentId: 'child-1', mode: 'fast', role: 'planner',
+      model: 'm-strong', escalates: false, recent: [],
+    })
+    expect(text).not.toContain('duplicates')
+    expect(text).not.toContain('fallback route')
   })
 })
 
