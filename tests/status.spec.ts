@@ -160,6 +160,26 @@ describe('team_status execute', () => {
 })
 
 describe('team_status render', () => {
+  it('appends the delegation discipline when nothing has been dispatched yet', () => {
+    const definition = defineTeamStatusTool(deps({ cfg: config({ modes: { fast: fastMode() } }) }))
+    const value = {
+      kind: 'status',
+      modes: [{
+        mode: 'fast',
+        running: 0,
+        concurrency: 2,
+        roles: [
+          { role: 'planner', model: 'm-strong', effort: 'high', dispatched: 0, running: 0, failed: 0 },
+          { role: 'coder', model: 'm-fast', effort: 'low', dispatched: 0, running: 0, failed: 0 },
+        ],
+      }],
+    }
+    expect(renderText(definition, value)).toBe('dispatches 0/2 running\n'
+      + 'planner: 0 running / 0 dispatched (m-strong at high)\n'
+      + 'coder: 0 running / 0 dispatched (m-fast at low)\n'
+      + 'no child dispatched yet; you are the implementer of last resort — dispatch the matching kind before implementing directly')
+  })
+
   it('keeps the single-mode rendering free of mode names', () => {
     const definition = defineTeamStatusTool(deps({ settled: ['c3'], running: { fast: 1 }, cfg: config({ modes: { fast: fastMode() } }) }))
     const value = {

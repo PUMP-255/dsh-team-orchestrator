@@ -128,8 +128,25 @@ describe('ConfigSchema', () => {
     expect(message).toContain('fallback')
   })
 
-  it('rejects a role that omits a pinned route field', async () => {
-    const message = await rejected({
+  it('accepts a role that only extends its parent and resolves to the parent route', async () => {
+    const config = await accepted({
+      modes: {
+        solo: {
+          roles: {
+            worker: { provider: 'p', model: 'm', reasoningEffort: 'low', maxTokens: 4096 },
+            coder: { extends: 'worker' },
+          },
+          taskRouting: { implement: 'coder' },
+        },
+      },
+    })
+    const mode = resolveModes(config).defaultMode
+    expect(mode.roles.get('coder')?.route).toEqual({ provider: 'p', model: 'm', reasoningEffort: 'low' })
+    expect(mode.roles.get('coder')?.options).toEqual({ maxTokens: 4096, provider: 'p', model: 'm', reasoningEffort: 'low' })
+  })
+
+  it('hands a route-incomplete role to mode resolution, which rejects it', async () => {
+    const config = await accepted({
       modes: {
         solo: {
           roles: { coder: { provider: 'p', reasoningEffort: 'low' } },
@@ -137,7 +154,7 @@ describe('ConfigSchema', () => {
         },
       },
     })
-    expect(message).toContain('model')
+    expect(() => resolveModes(config)).toThrow('is incomplete after inheritance')
   })
 
   it('rejects a configuration with no modes table', async () => {

@@ -22,15 +22,21 @@ export interface FallbackConfig {
 }
 
 /**
- * One declared team role and its pinned child LLM route.
+ * One declared team role: an optional inheritance parent plus the fields it
+ * declares. Every field may come from the role itself or, when absent, from
+ * anywhere along its `extends` chain inside the same mode — the nearest
+ * declaration wins; {@link ./roles.ts} rejects a role left without a complete
+ * route after inheritance.
  */
 export interface RoleConfig {
+  /** Role whose declared fields this role inherits; must name a role this mode declares. */
+  readonly extends?: string
   /** Registered LLM provider id. */
-  readonly provider: string
+  readonly provider?: string
   /** Provider-owned exact model id. */
-  readonly model: string
+  readonly model?: string
   /** Adapter-owned reasoning effort id for this exact route. */
-  readonly reasoningEffort: string
+  readonly reasoningEffort?: string
   /** One-line role discipline prepended to delegated prompts. */
   readonly brief?: string
   /** Agent preset id the role's children join; requires the agent-presets service and a provider with the agentPreset capability. */
@@ -39,9 +45,11 @@ export interface RoleConfig {
   readonly maxTokens?: number
   /**
    * Stronger route this role escalates to when its primary child settles
-   * without completing. Absent (or explicitly null) when the role declares no
-   * fallback; a schemastery nested object cannot express "absent" because it
-   * defaults to `{}` and then rejects its own required children.
+   * without completing. Absent — or an explicit `null`, which the schema
+   * normalizes to absent — inherits the chain's nearest declared fallback; a
+   * role that must not escalate extends a fallback-free parent instead. A
+   * schemastery nested object cannot express "absent" because it defaults to
+   * `{}` and then rejects its own required children, hence the union.
    */
   readonly fallback?: FallbackConfig | null
 }
@@ -90,16 +98,18 @@ const FallbackSchema = z.object({
 
 /** Schemastery schema for one declared role. */
 const RoleSchema = z.object({
-  provider: z.string().min(1).required(),
-  model: z.string().min(1).required(),
-  reasoningEffort: z.string().min(1).required(),
+  extends: z.string().min(1),
+  provider: z.string().min(1),
+  model: z.string().min(1),
+  reasoningEffort: z.string().min(1),
   brief: z.string(),
   preset: z.string().min(1),
   maxTokens: z.natural().min(1),
   // A bare nested object defaults to `{}` when the key is absent, and its
   // required children then reject every role that legitimately declares no
-  // fallback. The nullable union keeps absence absent while still validating
-  // the whole route whenever one is declared.
+  // fallback. The nullable union keeps absence absent (inherit the chain's
+  // fallback) while an explicit null declares none, and a declared route is
+  // still validated whole.
   fallback: z.union([FallbackSchema, z.const(null)]),
 })
 

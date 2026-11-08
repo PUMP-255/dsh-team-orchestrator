@@ -79,13 +79,19 @@
           review: reviewer
 ```
 
-挂载时拒绝空模式表、空角色表、空路由表、指向本模式未声明角色的路由项、没有任何 `taskRouting` 项指向的角色,以及与主路完全相同的角色兜底路由。`defaultMode` 只在恰好声明一个模式时可以省略——该模式即默认模式;声明多个模式而省略默认被拒绝而非猜测,`defaultMode` 指向未声明模式也被拒绝。每个模式的每条声明路由都会对照运行中的 LLM 运行时校验——provider 查找、精确模型元数据、思考强度可许性——在初始化时执行;provider 适配器尚未注册的路由推迟到下一次 `llm/adapters-updated` 事件,无效路由在该处失败。声明的角色 preset 在初始化时校验:agent-presets 服务未挂载或 preset id 无法解析即拒绝;agent-preset 能力要求 dsh 宿主 ≥0.2.1-rc.1(更旧的宿主只在角色确实声明 preset 时才拒绝挂载——随包默认配置不声明)。数值型 `maxDepth` 在 provider 注册时校验,provider 缺少 depthLimit 能力即拒绝;该校验与深度上限都按模式各自生效。
+挂载时拒绝空模式表、空角色表、空路由表、指向本模式未声明角色的路由项、没有任何 `taskRouting` 项指向且无人继承的角色、继承环、指向未声明角色的继承、继承后仍不完整的角色,以及与主路完全相同的角色兜底路由。`defaultMode` 只在恰好声明一个模式时可以省略——该模式即默认模式;声明多个模式而省略默认被拒绝而非猜测,`defaultMode` 指向未声明模式也被拒绝。每个模式的每条声明路由都会对照运行中的 LLM 运行时校验——provider 查找、精确模型元数据、思考强度可许性——在初始化时执行;provider 适配器尚未注册的路由推迟到下一次 `llm/adapters-updated` 事件,无效路由在该处失败。声明的角色 preset 在初始化时校验:agent-presets 服务未挂载或 preset id 无法解析即拒绝;agent-preset 能力要求 dsh 宿主 ≥0.2.1-rc.1(更旧的宿主只在角色确实声明 preset 时才拒绝挂载——随包默认配置不声明)。数值型 `maxDepth` 在 provider 注册时校验,provider 缺少 depthLimit 能力即拒绝;该校验与深度上限都按模式各自生效。
 
 ### 模式
 
 模式拥有让一次部署比另一次更便宜或更严格的一切:有哪些角色、每个角色跑哪个模型与思考强度、该模式同时允许多少子代理、能递归多深。角色级 `preset`、`maxTokens`、`fallback` 也在模式内声明,因此便宜模式可以跑只读工具集的 coder,严格模式可以跑强模型 reviewer,而无需第二个插件实例。任务类型在所选模式内解析:只有一个模式声明过的类型在别的模式不可用,并被拒绝且列出该模式自己的类型表。
 
 仅在声明了多个模式时,`team_dispatch` 才暴露可选的 `mode` 参数;单模式配置下每次派发都跑该模式,参数不存在。省略 `mode` 则跑 `defaultMode`。并发槽按模式各自计数,因此两个模式同时运行时各自保持自己的上限。模式的 `brief` 是给队长的提示词指引——它不是运行时闸门,任何模式都无法强制队长发出他没发出的后续派发。
+
+### 角色继承
+
+角色可以声明 `extends`,继承其未声明的任意字段——路由字段、`brief`、`preset`、`maxTokens`、`fallback`——沿继承链逐字段取值,限于同一模式内,就近声明优先。共享同一条路由的一族角色因此保持紧凑,如 `examples/weak-matrix.patch.yml`:一个 `worker` 基角色持有弱路由与强兜底,每个真实角色只覆写自己的 `brief`。
+
+只作继承父角色的角色按设计不出现在 `taskRouting`:没有任何 kind 指向且无人继承的角色仍然被拒绝,路由目标的手误依旧响亮失败。显式 `fallback: null` 会被归一化为缺席,子角色继承链上的兜底且无法退出一角色不想升级就继承一个不带兜底的父角色。继承环、未知父角色、继承后路由不完整的角色在挂载时拒绝。
 
 ### 兜底升级
 
@@ -114,7 +120,7 @@ config:
 <a id="understand-the-implementation"></a>
 ## 理解实现
 
-`resolveModes` 独立解析每个模式并选出默认模式;`resolveMode` 承担模式自身 schema 无法表达的跨字段引用检查,并为每个角色构建带品牌化思考强度 id 的子代理 `AgentOptions`。`resolveTaskKind` 在单个模式内把请求的类型映射到角色,未知类型会列出该模式已声明类型。`flattenRoles` 为在线路由校验给每个模式的角色加键,`validateRoleRoutes` 把路由可许性委托给 `LlmRuntime.resolveCallConfig`,provider 缺少适配器的路由报告为推迟而不是让挂载失败。两个工具与队长提示词区在配置的 subagent 提供方注册时挂载;缺失的 provider 在日志中可见,并通过 `subagent/provider-added` 稍后挂载。
+`resolveModes` 独立解析每个模式并选出默认模式;`resolveMode` 承担模式自身 schema 无法表达的跨字段检查,并为每个角色构建带品牌化思考强度 id 的子代理 `AgentOptions`。它同时逐字段折叠 `extends` 继承(就近声明优先),拒绝继承环、未知父角色与继承后不完整的链。`resolveTaskKind` 在单个模式内把请求的类型映射到角色,未知类型会列出该模式已声明类型。`flattenRoles` 为在线路由校验给每个模式的角色加键,`validateRoleRoutes` 把路由可许性委托给 `LlmRuntime.resolveCallConfig`,provider 缺少适配器的路由报告为推迟而不是让挂载失败。两个工具与队长提示词区在配置的 subagent 提供方注册时挂载;缺失的 provider 在日志中可见,并通过 `subagent/provider-added` 稍后挂载。
 
 <a id="develop-this-package"></a>
 ## 开发本包

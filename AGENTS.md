@@ -23,7 +23,10 @@ src/
                        (provider/model/reasoningEffort/brief/preset/maxTokens/
                        fallback), allowCaptainOverride.
   roles.ts             resolveModes / resolveMode / resolveTaskKind /
-                       flattenRoles / validateRoleRoutes.
+                       flattenRoles / validateRoleRoutes; per-mode `extends`
+                       role inheritance (field-by-field, nearest wins; cycles,
+                       unknown parents, and incomplete chains reject; a role
+                       that is only an inheritance parent may stay unrouted).
   dispatch.ts          team_dispatch tool: mode+kind→role→AgentOptions, per-mode
                        concurrency and depth cap, fallback escalation on
                        non-completed settlement, recent-label dedupe hint,
@@ -77,10 +80,15 @@ the mode feature developed here first):
    per-mode concurrency/depth/status, the `team_dispatch` `mode` parameter —
    exists only here and must be ported upstream before the next sync; until
    then `diff -r` reports these files as different by design.
+4. **Role inheritance (`extends`) is standalone-first** (2026-11-09, inspired
+   by OO-Harness's inheritance ablation, arXiv:2610.28380): per-mode
+   field-by-field folding with nearest-wins, cycle/unknown-parent/incomplete
+   rejection, and the unrouted-inheritance-parent exemption. Port upstream
+   together with the mode table.
 
 Everything else must stay byte-identical to upstream. Verify with
 `diff -r` against `D:\projects\dsh-orch\packages\experimental\team-orchestrator`
-(only the three deltas above plus `@module` doc names may differ).
+(only the four deltas above plus `@module` doc names may differ).
 
 ## Hard constraints (all learned the hard way)
 
@@ -134,11 +142,13 @@ Everything else must stay byte-identical to upstream. Verify with
 
 ## Verification ladder
 
-1. `npm test` — 70 unit tests (ConfigSchema validation of the mount path and
-   its defaults, mode resolution and default-mode rules, in-mode routing, mode
-   and kind gating, per-mode concurrency on every admit/release path, fallback
-   escalation, schema/capability rejections, per-mode status folding and
-   rendering). All new behavior needs tests, including every rejection path.
+1. `npm test` — 81 unit tests (ConfigSchema validation of the mount path and
+   its defaults, mode resolution and default-mode rules, in-mode routing, role
+   inheritance folding with every rejection path, mode and kind gating,
+   per-mode concurrency on every admit/release path, fallback escalation,
+   schema/capability rejections, per-mode status folding and rendering, the
+   zero-dispatch delegation nudge). All new behavior needs tests, including
+   every rejection path.
 2. `npm run build` — must stay at 0 errors under `strict` +
    `exactOptionalPropertyTypes` + `noUncheckedIndexedAccess`.
 3. Real-API smoke (after any behavior change):
@@ -152,8 +162,21 @@ Everything else must stay byte-identical to upstream. Verify with
    carry `agentModel`/`agentReasoningEffort` — that is the ground truth for
    "which model actually ran".
 
-## Current state (2026-10-30)
+## Current state (2026-10-30; 2026-11-09 update below)
 
+- **2026-11-09: role inheritance, delegation nudges, evidence-grounded briefs.**
+  `npm test` 81/81, `npm run build` 0 errors; `lib/` rebuilt with src. Three
+  changes: (1) `RoleConfig.extends` per-mode inheritance (deltas above);
+  (2) `team_status` render appends the implementer-of-last-resort discipline
+  when nothing has been dispatched yet — the pilot campaign's failure mode was
+  a self-implementing captain holding 96.5% of tiered tokens; (3) the captain
+  section now requires grounding each brief in the conversation's evidence
+  (quote the failing test/error verbatim), from OO-Harness's trajectory- vs
+  description-routing ablation. The unrouted-role check gained the
+  inheritance-parent exemption (README documents it); `fallback: null` is
+  transparent under inheritance (the schema normalizes it to absent).
+  Re-verify the compressed `examples/weak-matrix.patch.yml` through
+  `--dump-config` and a real-API smoke before the next publish.
 - `main` at `f768982` (AGENTS.md handoff), pushed to
   `https://github.com/PUMP-255/dsh-team-orchestrator`. Working tree carries the
   unreleased 0.2.0-rc.1 mode work.

@@ -7,6 +7,12 @@
 # 派发的子代理未完成结算(error / max-tokens / refusal)时,
 # 插件自动用 fallback 路由重派一次,无需队长介入。
 #
+# 三个角色共用同一条弱路由和同一条强兜底,因此用 `extends` 收敛到
+# 一个基角色 `worker`:provider/model/reasoningEffort/fallback 全部
+# 沿继承链继承,就近声明优先,各角色只覆写自己的 brief(coder 加
+# maxTokens 防推理失控)。`worker` 本身不被任何 kind 路由——只作
+# 继承父角色的角色允许不被路由;未被路由且无人继承的角色仍然拒绝挂载。
+#
 # 只声明一个模式时不写 defaultMode —— 唯一的模式就是默认模式,
 # 队长不需要选择,team_dispatch 也不会暴露 mode 参数。
 # 多模式(快/均衡/严格)的写法见 modes.patch.yml。
@@ -22,34 +28,24 @@
           fast:
             concurrency: 3
             roles:
-              planner:
+              worker:
                 provider: deepseek-official
                 model: deepseek-flash
                 reasoningEffort: low
-                brief: You are the planning role. Produce a complete, directly implementable brief.
                 fallback:
                   provider: deepseek-official
                   model: deepseek-v4-pro
                   reasoningEffort: high
+              planner:
+                extends: worker
+                brief: You are the planning role. Produce a complete, directly implementable brief.
               coder:
-                provider: deepseek-official
-                model: deepseek-flash
-                reasoningEffort: low
+                extends: worker
                 brief: You are the implementation role. Follow the brief exactly; make no design decisions.
                 maxTokens: 65536
-                fallback:
-                  provider: deepseek-official
-                  model: deepseek-v4-pro
-                  reasoningEffort: high
               reviewer:
-                provider: deepseek-official
-                model: deepseek-flash
-                reasoningEffort: low
+                extends: worker
                 brief: You are the review role. Review correctness, edge cases, and style; report findings only.
-                fallback:
-                  provider: deepseek-official
-                  model: deepseek-v4-pro
-                  reasoningEffort: high
             taskRouting:
               plan: planner
               implement: coder

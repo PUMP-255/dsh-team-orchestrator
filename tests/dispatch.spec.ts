@@ -589,6 +589,7 @@ describe('captainSectionText', () => {
     expect(text).toContain('each kind runs on its configured role and model route')
     expect(text).toContain('`plan` → role `planner` (`m-strong` at `high` reasoning effort)')
     expect(text).toContain('`implement` → role `coder` (`m-fast` at `low` reasoning effort)')
+    expect(text).toContain('Ground the brief in the conversation\'s evidence')
     expect(text).toContain('implementer of last resort')
   })
 

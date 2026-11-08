@@ -216,7 +216,15 @@ export function defineTeamStatusTool(deps: TeamStatusDeps): ToolDefinition {
           ? `dispatches running: ${value.modes.map(mode => `${mode.mode} ${mode.running}/${mode.concurrency}`).join(', ')}`
           : `dispatches ${value.modes[0]?.running ?? 0}/${value.modes[0]?.concurrency ?? 0} running`
         const rows = value.modes.flatMap(mode => mode.roles.map(row => renderRoleRow(row, several ? `${mode.mode}/` : '')))
-        return [{ type: 'text', text: `${header}\n${rows.join('\n')}` }]
+        // The pilot campaign's failure mode was a captain that implemented
+        // everything itself (96.5% of tiered tokens): when nothing has been
+        // dispatched yet, the render names the discipline.
+        const dispatched = value.modes.reduce((total, mode) => total
+          + mode.roles.reduce((sum, row) => sum + row.dispatched, 0), 0)
+        const nudge = dispatched === 0
+          ? '\nno child dispatched yet; you are the implementer of last resort — dispatch the matching kind before implementing directly'
+          : ''
+        return [{ type: 'text', text: `${header}\n${rows.join('\n')}${nudge}` }]
       },
     },
     isConcurrencySafe: () => true,

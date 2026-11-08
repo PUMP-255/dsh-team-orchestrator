@@ -1,9 +1,9 @@
 /**
  * Pure mode resolution: config data in, resolved per-mode role tables out. Owns
- * the cross-field referent checks the schema cannot express (routing targets,
- * non-empty tables, the default mode) so misconfiguration rejects at the resolve
- * step. Each mode resolves independently: a role id and a task kind mean what
- * that mode declares them to mean.
+ * the cross-field checks the schema cannot express (inheritance chains, routing
+ * targets, non-empty tables, the default mode) so misconfiguration rejects at
+ * the resolve step. Each mode resolves independently: a role id and a task kind
+ * mean what that mode declares them to mean.
  *
  * @module @deepseek-ai/dsh-team-orchestrator/roles
  */
@@ -69,8 +69,10 @@ export interface ResolvedTeam {
 }
 /**
  * Resolve one declared mode. Rejects an empty role table, an empty routing map,
- * routing that names a role the mode does not declare, and a fallback identical
- * to its primary route.
+ * routing that names a role the mode does not declare, an inheritance cycle, an
+ * unknown inheritance parent, a role left without a complete route after
+ * inheritance, an unnamed unrouted role, and a fallback identical to its
+ * primary route.
  * @param id - the mode id from the configuration table.
  * @param mode - that mode's validated configuration.
  * @returns the resolved mode.

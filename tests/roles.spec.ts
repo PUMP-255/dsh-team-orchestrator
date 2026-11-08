@@ -178,6 +178,124 @@ describe('surfaced misconfiguration', () => {
   })
 })
 
+describe('role inheritance', () => {
+  it('inherits the parent route and optional fields when the child declares none', () => {
+    const mode = resolveMode('fast', fastMode({
+      roles: {
+        worker: {
+          provider: 'other', model: 'm-fast', reasoningEffort: 'low',
+          brief: 'follow the brief', preset: 'minimal', maxTokens: 4096,
+          fallback: { provider: 'p2', model: 'm-strong', reasoningEffort: 'max' },
+        },
+        coder: { extends: 'worker' },
+      },
+      taskRouting: { implement: 'coder' },
+    }))
+    const coder = mode.roles.get('coder')
+    expect(coder?.route).toEqual({ provider: 'other', model: 'm-fast', reasoningEffort: 'low' })
+    expect(coder?.options).toEqual({ maxTokens: 4096, provider: 'other', model: 'm-fast', reasoningEffort: 'low' })
+    expect(coder?.brief).toBe('follow the brief')
+    expect(coder?.preset).toBe('minimal')
+    expect(coder?.fallback?.route).toEqual({ provider: 'p2', model: 'm-strong', reasoningEffort: 'max' })
+  })
+
+  it('overrides inherited fields field-by-field', () => {
+    const mode = resolveMode('fast', fastMode({
+      roles: {
+        worker: {
+          provider: 'other', model: 'm-fast', reasoningEffort: 'low', maxTokens: 4096,
+          fallback: { provider: 'p2', model: 'm-strong', reasoningEffort: 'max' },
+        },
+        reviewer: {
+          extends: 'worker', model: 'm-pro', reasoningEffort: 'high', maxTokens: 8192,
+          brief: 'review findings only',
+        },
+      },
+      taskRouting: { implement: 'worker', review: 'reviewer' },
+    }))
+    const reviewer = mode.roles.get('reviewer')
+    expect(reviewer?.route).toEqual({ provider: 'other', model: 'm-pro', reasoningEffort: 'high' })
+    expect(reviewer?.options).toEqual({ maxTokens: 8192, provider: 'other', model: 'm-pro', reasoningEffort: 'high' })
+    expect(reviewer?.brief).toBe('review findings only')
+    expect(reviewer?.fallback?.route.model).toBe('m-strong')
+    expect(mode.roles.get('worker')?.brief).toBeUndefined()
+  })
+
+  it('resolves multi-level chains with the nearest declaration winning', () => {
+    const mode = resolveMode('fast', fastMode({
+      roles: {
+        base: { provider: 'deepseek-official', model: 'm-base', reasoningEffort: 'off' },
+        mid: { extends: 'base', reasoningEffort: 'high' },
+        leaf: { extends: 'mid', model: 'm-leaf' },
+      },
+      taskRouting: { implement: 'leaf' },
+    }))
+    expect(mode.roles.get('leaf')?.route).toEqual({
+      provider: 'deepseek-official', model: 'm-leaf', reasoningEffort: 'high',
+    })
+  })
+
+  it('inherits the fallback through a missing declaration and through an explicit null', () => {
+    const mode = resolveMode('fast', fastMode({
+      roles: {
+        base: {
+          provider: 'p', model: 'm', reasoningEffort: 'low',
+          fallback: { provider: 'p', model: 'm-strong', reasoningEffort: 'max' },
+        },
+        escalates: { extends: 'base' },
+        plain: { extends: 'base', fallback: null },
+      },
+      taskRouting: { implement: 'escalates', plan: 'plain' },
+    }))
+    // The schema normalizes an explicit null to absent, so both children
+    // inherit the chain's fallback; a role that must not escalate extends a
+    // fallback-free parent instead.
+    expect(mode.roles.get('escalates')?.fallback?.route.model).toBe('m-strong')
+    expect(mode.roles.get('plain')?.fallback?.route.model).toBe('m-strong')
+  })
+
+  it('rejects an unknown inheritance parent and lists the mode\'s roles', () => {
+    expect(() => resolveMode('fast', fastMode({
+      roles: { coder: { extends: 'worker', provider: 'p', model: 'm', reasoningEffort: 'low' } },
+      taskRouting: { implement: 'coder' },
+    }))).toThrow('mode "fast": role "coder" extends undeclared role "worker"; declared roles: "coder"')
+  })
+
+  it('rejects an inheritance cycle, naming the mode', () => {
+    expect(() => resolveMode('fast', fastMode({
+      roles: {
+        a: { extends: 'b', provider: 'p', model: 'm', reasoningEffort: 'low' },
+        b: { extends: 'a' },
+      },
+      taskRouting: { implement: 'a' },
+    }))).toThrow('mode "fast": role inheritance cycle "a" -> "b" -> "a"')
+  })
+
+  it('rejects a self-extending role', () => {
+    expect(() => resolveMode('fast', fastMode({
+      roles: { a: { extends: 'a', provider: 'p', model: 'm', reasoningEffort: 'low' } },
+      taskRouting: { implement: 'a' },
+    }))).toThrow('mode "fast": role inheritance cycle "a" -> "a"')
+  })
+
+  it('rejects a role left without route fields and names the missing ones', () => {
+    expect(() => resolveMode('fast', fastMode({
+      roles: { coder: { provider: 'p' } },
+      taskRouting: { implement: 'coder' },
+    }))).toThrow('mode "fast": role "coder" is incomplete after inheritance: missing model, reasoningEffort')
+  })
+
+  it('rejects an incomplete chain root before the child that extends it', () => {
+    expect(() => resolveMode('fast', fastMode({
+      roles: {
+        worker: { model: 'm', reasoningEffort: 'low' },
+        coder: { extends: 'worker' },
+      },
+      taskRouting: { implement: 'coder' },
+    }))).toThrow('mode "fast": role "worker" is incomplete after inheritance: missing provider')
+  })
+})
+
 describe('validateRoleRoutes', () => {
   it('passes when the runtime resolves every route of every mode', async () => {
     const seen: string[] = []
